@@ -40,6 +40,13 @@ try:
 except ImportError:
     SCREENING_AVAILABLE = False
 
+# Import Law Enforcement views if available
+try:
+    import law_enforcement.views as law_enforcement_views
+    LAW_ENFORCEMENT_AVAILABLE = True
+except ImportError:
+    LAW_ENFORCEMENT_AVAILABLE = False
+
 # API Router
 router = DefaultRouter()
 router.register(r'customers', accounts_views.CustomerViewSet, basename='customer')
@@ -62,6 +69,11 @@ if KYC_AVAILABLE:
 # Register Screening endpoints if available
 if SCREENING_AVAILABLE:
     router.register(r'screening', screening_views.ScreeningViewSet, basename='screening')
+
+# Register Law Enforcement endpoints if available
+if LAW_ENFORCEMENT_AVAILABLE:
+    router.register(r'sar-transmissions', law_enforcement_views.SARTransmissionViewSet, basename='sar-transmission')
+    router.register(r'law-enforcement-agencies', law_enforcement_views.LawEnforcementAgencyViewSet, basename='law-enforcement-agency')
 
 urlpatterns = [
     # Admin

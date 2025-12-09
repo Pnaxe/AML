@@ -8,15 +8,15 @@ const LawEnforcement = () => {
     const [typeFilter, setTypeFilter] = useState('')
     const [statusFilter, setStatusFilter] = useState('')
 
-    // Using alerts API as a placeholder for law enforcement requests
-    // In production, this would be a law enforcement API
+    // Fetch SAR transmissions sent from SAR
     const { data, isLoading, error } = useQuery({
-        queryKey: ['law-enforcement', searchQuery, typeFilter, statusFilter],
+        queryKey: ['sar-transmissions', searchQuery, typeFilter, statusFilter],
         queryFn: () => {
             const params = {}
             if (searchQuery) params.search = searchQuery
             if (statusFilter) params.status = statusFilter.toUpperCase()
-            return axios.get(`${base_url}/alerts/`, { params }).then(res => res.data)
+            if (typeFilter) params.priority = typeFilter.toUpperCase()
+            return axios.get(`${base_url}/sar-transmissions/`, { params }).then(res => res.data)
         },
     })
 
@@ -24,17 +24,20 @@ const LawEnforcement = () => {
 
     const getStatusBadgeClass = (status) => {
         switch (status) {
-            case 'APPROVED':
-            case 'COMPLETED':
+            case 'TRANSMITTED':
+            case 'ACKNOWLEDGED':
                 return 'bg-green-100 text-green-700'
-            case 'PENDING':
-            case 'UNDER_REVIEW':
+            case 'APPROVED':
+            case 'QUEUED':
+                return 'bg-blue-100 text-blue-700'
+            case 'PENDING_APPROVAL':
+            case 'TRANSMITTING':
                 return 'bg-yellow-100 text-yellow-700'
             case 'REJECTED':
-            case 'DENIED':
+            case 'FAILED':
                 return 'bg-red-100 text-red-700'
             default:
-                return 'bg-blue-100 text-blue-700'
+                return 'bg-gray-100 text-gray-700'
         }
     }
 
@@ -56,17 +59,7 @@ const LawEnforcement = () => {
             <div className="mb-4 flex items-center justify-between">
                 <div>
                     <h4 className="text-base font-bold text-gray-900">Law Enforcement Portal</h4>
-                    <small className="text-gray-500 text-xs">Law enforcement access and reporting</small>
-                </div>
-                <div>
-                    <button
-                        className="bg-blue-600 text-white px-4 py-2 hover:bg-blue-700 transition-all duration-200 flex items-center space-x-2 font-medium"
-                    >
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd"></path>
-                        </svg>
-                        <span>New Request</span>
-                    </button>
+                    <small className="text-gray-500 text-xs">SAR transmissions sent from banks</small>
                 </div>
             </div>
 
@@ -78,26 +71,26 @@ const LawEnforcement = () => {
                         <div className="relative">
                             <input
                                 type="text"
-                                placeholder="Search requests..."
+                                placeholder="Search SAR transmissions..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 className="w-64 px-4 py-2 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm bg-white"
                             />
                         </div>
 
-                        {/* Request Type Filter */}
+                        {/* Priority Filter */}
                         <div className="flex items-center space-x-2 ml-4">
-                            <label className="text-xs font-medium text-gray-700">Type:</label>
+                            <label className="text-xs font-medium text-gray-700">Priority:</label>
                             <select
                                 value={typeFilter}
                                 onChange={(e) => setTypeFilter(e.target.value)}
                                 className="px-3 py-1 border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-auto min-w-[140px]"
                             >
-                                <option value="">All Types</option>
-                                <option value="data_request">Data Request</option>
-                                <option value="investigation">Investigation</option>
-                                <option value="subpoena">Subpoena</option>
-                                <option value="warrant">Warrant</option>
+                                <option value="">All Priorities</option>
+                                <option value="ROUTINE">Routine</option>
+                                <option value="PRIORITY">Priority</option>
+                                <option value="URGENT">Urgent</option>
+                                <option value="CRITICAL">Critical</option>
                             </select>
                         </div>
 
@@ -110,10 +103,15 @@ const LawEnforcement = () => {
                                 className="px-3 py-1 border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-auto min-w-[120px]"
                             >
                                 <option value="">All Status</option>
-                                <option value="pending">Pending</option>
-                                <option value="approved">Approved</option>
-                                <option value="rejected">Rejected</option>
-                                <option value="completed">Completed</option>
+                                <option value="DRAFT">Draft</option>
+                                <option value="PENDING_APPROVAL">Pending Approval</option>
+                                <option value="APPROVED">Approved</option>
+                                <option value="QUEUED">Queued</option>
+                                <option value="TRANSMITTING">Transmitting</option>
+                                <option value="TRANSMITTED">Transmitted</option>
+                                <option value="ACKNOWLEDGED">Acknowledged</option>
+                                <option value="FAILED">Failed</option>
+                                <option value="REJECTED">Rejected</option>
                             </select>
                         </div>
                     </div>
@@ -161,13 +159,13 @@ const LawEnforcement = () => {
                             <thead className="bg-gray-700 sticky top-0 z-10">
                                 <tr className="border-b border-gray-200">
                                     <th className="px-2 md:px-3 py-1.5 md:py-2 text-left text-xs font-black uppercase tracking-wider whitespace-nowrap border-r border-gray-300" style={{ color: '#f3f4f6' }}>
-                                        REQUEST ID
+                                        SAR ID
                                     </th>
                                     <th className="px-2 md:px-3 py-1.5 md:py-2 text-left text-xs font-black uppercase tracking-wider whitespace-nowrap border-r border-gray-300" style={{ color: '#f3f4f6' }}>
                                         AGENCY
                                     </th>
                                     <th className="px-2 md:px-3 py-1.5 md:py-2 text-left text-xs font-black uppercase tracking-wider whitespace-nowrap border-r border-gray-300" style={{ color: '#f3f4f6' }}>
-                                        REQUEST TYPE
+                                        SUBJECT
                                     </th>
                                     <th className="px-2 md:px-3 py-1.5 md:py-2 text-left text-xs font-black uppercase tracking-wider whitespace-nowrap border-r border-gray-300" style={{ color: '#f3f4f6' }}>
                                         STATUS
@@ -176,7 +174,10 @@ const LawEnforcement = () => {
                                         PRIORITY
                                     </th>
                                     <th className="px-2 md:px-3 py-1.5 md:py-2 text-left text-xs font-black uppercase tracking-wider whitespace-nowrap border-r border-gray-300" style={{ color: '#f3f4f6' }}>
-                                        REQUEST DATE
+                                        AMOUNT
+                                    </th>
+                                    <th className="px-2 md:px-3 py-1.5 md:py-2 text-left text-xs font-black uppercase tracking-wider whitespace-nowrap border-r border-gray-300" style={{ color: '#f3f4f6' }}>
+                                        TRANSMITTED
                                     </th>
                                     <th className="px-2 md:px-3 py-1.5 md:py-2 text-left text-xs font-black uppercase tracking-wider whitespace-nowrap" style={{ color: '#f3f4f6' }}>
                                         ACTIONS
@@ -184,52 +185,56 @@ const LawEnforcement = () => {
                                 </tr>
                             </thead>
                             <tbody className="bg-white">
-                                {Array.from({ length: 25 }).map((_, index) => {
-                                    const item = requests[index];
-                                    return (
-                                        <tr key={item?.id || index} className={`border-b border-gray-200 ${index % 2 === 0 ? 'bg-gray-100' : 'bg-gray-50'} ${item ? 'hover:opacity-80' : ''}`} style={{ minHeight: '36px' }}>
+                                {requests.length > 0 ? (
+                                    requests.map((item, index) => (
+                                        <tr key={item.id} className={`border-b border-gray-200 ${index % 2 === 0 ? 'bg-gray-100' : 'bg-gray-50'} hover:opacity-80`} style={{ minHeight: '36px' }}>
                                             <td className="px-2 md:px-3 py-1.5 md:py-2 text-xs font-mono text-gray-900 whitespace-nowrap border-r border-gray-200" style={{ minHeight: '36px' }}>
-                                                {item ? `REQ-${String(item.id || index).padStart(6, '0')}` : '\u00A0'}
+                                                {item.sar_id || `SAR-${String(item.id).padStart(6, '0')}`}
                                             </td>
                                             <td className="px-2 md:px-3 py-1.5 md:py-2 text-xs text-gray-900 whitespace-nowrap border-r border-gray-200" style={{ minHeight: '36px' }}>
-                                                {item ? `Agency ${item.id || index}` : '\u00A0'}
+                                                {item.agency?.name || 'N/A'}
                                             </td>
                                             <td className="px-2 md:px-3 py-1.5 md:py-2 text-xs text-gray-600 whitespace-nowrap truncate border-r border-gray-200" style={{ minHeight: '36px' }}>
-                                                {item?.alert_type || 'Data Request' || '\u00A0'}
+                                                {item.subject_customer_name || 'N/A'}
                                             </td>
                                             <td className="px-2 md:px-3 py-1.5 md:py-2 whitespace-nowrap border-r border-gray-200" style={{ minHeight: '36px' }}>
-                                                {item ? (
-                                                    <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadgeClass(item.status || 'PENDING')}`}>
-                                                        {item.status || 'Pending'}
-                                                    </span>
-                                                ) : '\u00A0'}
+                                                <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadgeClass(item.status || 'DRAFT')}`}>
+                                                    {item.status?.replace('_', ' ') || 'Draft'}
+                                                </span>
                                             </td>
                                             <td className="px-2 md:px-3 py-1.5 md:py-2 whitespace-nowrap border-r border-gray-200" style={{ minHeight: '36px' }}>
-                                                {item ? (
-                                                    <span className={`px-2 py-1 rounded-full text-xs ${getPriorityBadgeClass(item.severity || 'LOW')}`}>
-                                                        {item.severity || 'Low'}
-                                                    </span>
-                                                ) : '\u00A0'}
+                                                <span className={`px-2 py-1 rounded-full text-xs ${getPriorityBadgeClass(item.priority || 'ROUTINE')}`}>
+                                                    {item.priority || 'Routine'}
+                                                </span>
+                                            </td>
+                                            <td className="px-2 md:px-3 py-1.5 md:py-2 text-xs text-gray-900 whitespace-nowrap border-r border-gray-200" style={{ minHeight: '36px' }}>
+                                                {item.total_suspicious_amount 
+                                                    ? `${item.currency || 'USD'} ${parseFloat(item.total_suspicious_amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                                    : 'N/A'}
                                             </td>
                                             <td className="px-2 md:px-3 py-1.5 md:py-2 text-xs text-gray-500 whitespace-nowrap border-r border-gray-200" style={{ minHeight: '36px' }}>
-                                                {item?.created_at ? new Date(item.created_at).toLocaleDateString() : '\u00A0'}
+                                                {item.transmitted_at 
+                                                    ? new Date(item.transmitted_at).toLocaleDateString()
+                                                    : item.created_at 
+                                                        ? new Date(item.created_at).toLocaleDateString()
+                                                        : 'N/A'}
                                             </td>
                                             <td className="px-2 md:px-3 py-1.5 md:py-2 whitespace-nowrap" style={{ minHeight: '36px' }}>
-                                                {item ? (
-                                                    <div className="flex items-center space-x-2">
-                                                        <button className="text-blue-600 hover:text-blue-800 text-xs font-medium">
-                                                            View
-                                                        </button>
-                                                        <button className="text-gray-400">|</button>
-                                                        <button className="text-gray-600 hover:text-gray-800 text-xs font-medium">
-                                                            Edit
-                                                        </button>
-                                                    </div>
-                                                ) : '\u00A0'}
+                                                <div className="flex items-center space-x-2">
+                                                    <button className="text-blue-600 hover:text-blue-800 text-xs font-medium">
+                                                        View
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
-                                    );
-                                })}
+                                    ))
+                                ) : (
+                                    <tr>
+                                        <td colSpan="8" className="px-2 md:px-3 py-1.5 md:py-2 text-center text-xs text-gray-500">
+                                            No SAR transmissions found
+                                        </td>
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
                     )}
@@ -242,7 +247,7 @@ const LawEnforcement = () => {
                 borderBottom: '1px solid rgba(0, 0, 0, 0.1)'
             }}>
                 <div className="text-sm text-gray-700">
-                    {data?.count ? `Showing ${data.count} requests` : 'All requests displayed'}
+                    {data?.count ? `Showing ${requests.length} of ${data.count} SAR transmissions` : requests.length > 0 ? `Showing ${requests.length} SAR transmissions` : 'No SAR transmissions'}
                 </div>
             </div>
         </div>

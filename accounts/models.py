@@ -10,6 +10,8 @@ class CustomUser(AbstractUser):
         ('ANALYST', 'Compliance Analyst'),
         ('INVESTIGATOR', 'Investigator'),
         ('VIEWER', 'Viewer'),
+        ('REGULATOR', 'Regulator'),
+        ('BANK', 'Bank User'),
     ]
     
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='VIEWER')

@@ -1,8 +1,11 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import Layout from './components/Layout'
+import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
+import RegulatorDashboard from './pages/RegulatorDashboard'
 import CustomerList from './pages/CustomerList'
 import TransactionList from './pages/TransactionList'
 import AlertList from './pages/AlertList'
@@ -14,7 +17,34 @@ import LawEnforcement from './pages/LawEnforcement'
 import ML from './pages/ML'
 import Reports from './pages/Reports'
 import Configurations from './pages/Configurations'
-import { initAuth } from './services/auth'
+import { initAuth, getCurrentUser } from './services/auth'
+
+// Component to conditionally render dashboard based on user role
+const DashboardRoute = () => {
+    const { data: currentUser, isLoading } = useQuery({
+        queryKey: ['current-user'],
+        queryFn: getCurrentUser,
+        retry: false,
+        staleTime: 5 * 60 * 1000,
+    })
+
+    if (isLoading) {
+        return (
+            <div className="flex items-center justify-center h-full">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+            </div>
+        )
+    }
+
+    const userRole = currentUser?.role || 'VIEWER'
+    
+    // Show RegulatorDashboard for regulators, regular Dashboard for others
+    if (userRole === 'REGULATOR') {
+        return <RegulatorDashboard />
+    }
+    
+    return <Dashboard />
+}
 
 const queryClient = new QueryClient({
     defaultOptions: {
@@ -37,18 +67,83 @@ function App() {
                     <Route path="/*" element={
                         <Layout>
                             <Routes>
-                                <Route path="/" element={<Dashboard />} />
-                                <Route path="/customers" element={<CustomerList />} />
-                                <Route path="/transactions" element={<TransactionList />} />
-                                <Route path="/alerts" element={<AlertList />} />
-                                <Route path="/screening" element={<Screening />} />
-                                <Route path="/kyc" element={<KYC />} />
+                                <Route path="/" element={<DashboardRoute />} />
+                                {/* Bank-only pages - Hidden from Regulators */}
+                                <Route 
+                                    path="/customers" 
+                                    element={
+                                        <ProtectedRoute allowedRoles={['ADMIN', 'ANALYST', 'INVESTIGATOR', 'VIEWER', 'BANK']}>
+                                            <CustomerList />
+                                        </ProtectedRoute>
+                                    } 
+                                />
+                                <Route 
+                                    path="/transactions" 
+                                    element={
+                                        <ProtectedRoute allowedRoles={['ADMIN', 'ANALYST', 'INVESTIGATOR', 'VIEWER', 'BANK']}>
+                                            <TransactionList />
+                                        </ProtectedRoute>
+                                    } 
+                                />
+                                <Route 
+                                    path="/alerts" 
+                                    element={
+                                        <ProtectedRoute allowedRoles={['ADMIN', 'ANALYST', 'INVESTIGATOR', 'VIEWER', 'BANK']}>
+                                            <AlertList />
+                                        </ProtectedRoute>
+                                    } 
+                                />
+                                <Route 
+                                    path="/screening" 
+                                    element={
+                                        <ProtectedRoute allowedRoles={['ADMIN', 'ANALYST', 'INVESTIGATOR', 'VIEWER', 'BANK']}>
+                                            <Screening />
+                                        </ProtectedRoute>
+                                    } 
+                                />
+                                <Route 
+                                    path="/kyc" 
+                                    element={
+                                        <ProtectedRoute allowedRoles={['ADMIN', 'ANALYST', 'INVESTIGATOR', 'VIEWER', 'BANK']}>
+                                            <KYC />
+                                        </ProtectedRoute>
+                                    } 
+                                />
+                                <Route 
+                                    path="/cases" 
+                                    element={
+                                        <ProtectedRoute allowedRoles={['ADMIN', 'ANALYST', 'INVESTIGATOR', 'VIEWER', 'BANK']}>
+                                            <Cases />
+                                        </ProtectedRoute>
+                                    } 
+                                />
+                                <Route 
+                                    path="/ml" 
+                                    element={
+                                        <ProtectedRoute allowedRoles={['ADMIN', 'ANALYST', 'INVESTIGATOR', 'VIEWER', 'BANK']}>
+                                            <ML />
+                                        </ProtectedRoute>
+                                    } 
+                                />
+                                <Route 
+                                    path="/configurations" 
+                                    element={
+                                        <ProtectedRoute allowedRoles={['ADMIN', 'ANALYST', 'INVESTIGATOR', 'VIEWER', 'BANK']}>
+                                            <Configurations />
+                                        </ProtectedRoute>
+                                    } 
+                                />
+                                {/* Regulator-accessible pages */}
                                 <Route path="/sar" element={<SAR />} />
-                                <Route path="/cases" element={<Cases />} />
-                                <Route path="/law-enforcement" element={<LawEnforcement />} />
-                                <Route path="/ml" element={<ML />} />
+                                <Route 
+                                    path="/law-enforcement" 
+                                    element={
+                                        <ProtectedRoute allowedRoles={['REGULATOR']}>
+                                            <LawEnforcement />
+                                        </ProtectedRoute>
+                                    } 
+                                />
                                 <Route path="/reports" element={<Reports />} />
-                                <Route path="/configurations" element={<Configurations />} />
                             </Routes>
                         </Layout>
                     } />

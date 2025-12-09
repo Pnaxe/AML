@@ -1,16 +1,29 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { base_url } from '../services/api'
+import { getCurrentUser } from '../services/auth'
 
 const Reports = () => {
     const [searchQuery, setSearchQuery] = useState('')
     const [typeFilter, setTypeFilter] = useState('')
     const [statusFilter, setStatusFilter] = useState('')
     const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false)
+    
+    // Get current user to determine role
+    const { data: currentUser } = useQuery({
+        queryKey: ['current-user'],
+        queryFn: getCurrentUser,
+        retry: false,
+        staleTime: 5 * 60 * 1000,
+    })
+    
+    const userRole = currentUser?.role || 'VIEWER'
+    const isRegulator = userRole === 'REGULATOR'
+    
     const [reportForm, setReportForm] = useState({
         name: '',
-        type: 'compliance',
+        type: 'compliance', // Default, will be updated when role is determined
         format: 'pdf',
         date_range: 'custom',
         start_date: '',
@@ -21,6 +34,16 @@ const Reports = () => {
     })
     
     const queryClient = useQueryClient()
+    
+    // Update form type when user role is determined
+    useEffect(() => {
+        if (currentUser) {
+            setReportForm(prev => ({
+                ...prev,
+                type: isRegulator ? 'regulatory_compliance' : 'compliance'
+            }))
+        }
+    }, [currentUser, isRegulator])
 
     // Using alerts API as a placeholder for reports
     // In production, this would be a reports API
@@ -60,7 +83,7 @@ const Reports = () => {
     const resetReportForm = () => {
         setReportForm({
             name: '',
-            type: 'compliance',
+            type: isRegulator ? 'regulatory_compliance' : 'compliance',
             format: 'pdf',
             date_range: 'custom',
             start_date: '',
@@ -110,7 +133,9 @@ const Reports = () => {
             <div className="mb-4 flex items-center justify-between">
                 <div>
                     <h4 className="text-base font-bold text-gray-900">Reports</h4>
-                    <small className="text-gray-500 text-xs">Compliance reports and analytics</small>
+                    <small className="text-gray-500 text-xs">
+                        {isRegulator ? 'Regulatory oversight and compliance reports' : 'Compliance reports and analytics'}
+                    </small>
                 </div>
                 <div>
                     <button
@@ -149,10 +174,23 @@ const Reports = () => {
                                 className="px-3 py-1 border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-auto min-w-[140px]"
                             >
                                 <option value="">All Types</option>
-                                <option value="compliance">Compliance</option>
-                                <option value="risk">Risk</option>
-                                <option value="transaction">Transaction</option>
-                                <option value="audit">Audit</option>
+                                {isRegulator ? (
+                                    <>
+                                        <option value="regulatory_compliance">Regulatory Compliance</option>
+                                        <option value="sar_filing">SAR Filing</option>
+                                        <option value="bank_compliance">Bank Compliance Status</option>
+                                        <option value="law_enforcement">Law Enforcement</option>
+                                        <option value="cross_bank_analysis">Cross-Bank Analysis</option>
+                                        <option value="regulatory_oversight">Regulatory Oversight</option>
+                                    </>
+                                ) : (
+                                    <>
+                                        <option value="compliance">Compliance</option>
+                                        <option value="risk">Risk</option>
+                                        <option value="transaction">Transaction</option>
+                                        <option value="audit">Audit</option>
+                                    </>
+                                )}
                             </select>
                         </div>
 
@@ -347,12 +385,27 @@ const Reports = () => {
                                     onChange={(e) => setReportForm({ ...reportForm, type: e.target.value })}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 >
-                                    <option value="compliance">Compliance</option>
-                                    <option value="risk">Risk Assessment</option>
-                                    <option value="transaction">Transaction Analysis</option>
-                                    <option value="audit">Audit Report</option>
-                                    <option value="kyc">KYC Verification</option>
-                                    <option value="screening">Screening Report</option>
+                                    {isRegulator ? (
+                                        <>
+                                            <option value="regulatory_compliance">Regulatory Compliance</option>
+                                            <option value="sar_filing">SAR Filing Report</option>
+                                            <option value="bank_compliance">Bank Compliance Status</option>
+                                            <option value="law_enforcement">Law Enforcement Report</option>
+                                            <option value="cross_bank_analysis">Cross-Bank Analysis</option>
+                                            <option value="regulatory_oversight">Regulatory Oversight</option>
+                                            <option value="sar_trends">SAR Filing Trends</option>
+                                            <option value="compliance_metrics">Compliance Metrics</option>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <option value="compliance">Compliance</option>
+                                            <option value="risk">Risk Assessment</option>
+                                            <option value="transaction">Transaction Analysis</option>
+                                            <option value="audit">Audit Report</option>
+                                            <option value="kyc">KYC Verification</option>
+                                            <option value="screening">Screening Report</option>
+                                        </>
+                                    )}
                                 </select>
                             </div>
 

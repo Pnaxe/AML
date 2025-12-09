@@ -1,6 +1,38 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
+from django.contrib.auth.forms import UserCreationForm
+from django import forms
 from .models import CustomUser, Customer, DeletedCustomer
+
+
+class CustomUserCreationForm(UserCreationForm):
+    """Custom form for creating users with simplified role selection"""
+    role = forms.ChoiceField(
+        choices=[
+            ('BANK', 'Bank User'),
+            ('REGULATOR', 'Regulator'),
+        ],
+        required=True,
+        help_text='Select whether this user is a Bank User or Regulator',
+        label='User Type'
+    )
+    
+    class Meta:
+        model = CustomUser
+        fields = ('username', 'email', 'role')
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Set default role if not set
+        if not self.initial.get('role'):
+            self.initial['role'] = 'BANK'
+    
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        user.role = self.cleaned_data['role']
+        if commit:
+            user.save()
+        return user
 
 
 @admin.register(CustomUser)
@@ -10,9 +42,36 @@ class CustomUserAdmin(UserAdmin):
     list_filter = ['role', 'is_staff', 'is_active', 'department']
     search_fields = ['username', 'email', 'first_name', 'last_name']
     
-    fieldsets = UserAdmin.fieldsets + (
-        ('AML System Info', {'fields': ('role', 'department', 'phone_number')}),
+    # Use custom form for add view
+    add_form = CustomUserCreationForm
+    add_fieldsets = (
+        (None, {
+            'classes': ('wide',),
+            'fields': ('username', 'email', 'password1', 'password2', 'role'),
+        }),
     )
+    
+    fieldsets = UserAdmin.fieldsets + (
+        ('AML System Info', {
+            'fields': ('role', 'department', 'phone_number'),
+            'description': 'Role: Select BANK for bank users or REGULATOR for regulatory users'
+        }),
+    )
+    
+    def get_form(self, request, obj=None, **kwargs):
+        """Use custom form for add view, regular form for change view"""
+        defaults = {}
+        if obj is None:  # Creating a new user
+            defaults['form'] = self.add_form
+        defaults.update(kwargs)
+        form = super().get_form(request, obj, **defaults)
+        # For editing existing users, limit role choices to BANK and REGULATOR
+        if obj is not None and 'role' in form.base_fields:
+            form.base_fields['role'].choices = [
+                ('BANK', 'Bank User'),
+                ('REGULATOR', 'Regulator'),
+            ]
+        return form
 
 
 @admin.register(Customer)

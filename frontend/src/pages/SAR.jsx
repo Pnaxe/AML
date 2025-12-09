@@ -7,10 +7,10 @@ const SAR = () => {
     const [searchQuery, setSearchQuery] = useState('')
     const [statusFilter, setStatusFilter] = useState('')
     const [priorityFilter, setPriorityFilter] = useState('')
-    const [isComplianceModalOpen, setIsComplianceModalOpen] = useState(false)
     const [isViewModalOpen, setIsViewModalOpen] = useState(false)
+    const [isLawEnforcementModalOpen, setIsLawEnforcementModalOpen] = useState(false)
     const [selectedSAR, setSelectedSAR] = useState(null)
-    const [complianceForm, setComplianceForm] = useState({
+    const [lawEnforcementForm, setLawEnforcementForm] = useState({
         delivery_method: '',
         email: '',
         system_user: '',
@@ -70,13 +70,13 @@ const SAR = () => {
         setIsViewModalOpen(true)
     }
 
-    const handleSendToCompliance = (sarData) => {
+    const handleSendToLawEnforcement = (sarData) => {
         setSelectedSAR(sarData)
-        setIsComplianceModalOpen(true)
+        setIsLawEnforcementModalOpen(true)
     }
 
-    const resetComplianceForm = () => {
-        setComplianceForm({
+    const resetLawEnforcementForm = () => {
+        setLawEnforcementForm({
             delivery_method: '',
             email: '',
             system_user: '',
@@ -86,32 +86,32 @@ const SAR = () => {
         })
     }
 
-    const sendToComplianceMutation = useMutation({
+    const sendToLawEnforcementMutation = useMutation({
         mutationFn: async (formData) => {
             // TODO: Replace with actual API endpoint when available
             return Promise.resolve({ success: true, ...formData })
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['sar'] })
-            setIsComplianceModalOpen(false)
+            setIsLawEnforcementModalOpen(false)
             setSelectedSAR(null)
-            resetComplianceForm()
+            resetLawEnforcementForm()
         },
     })
 
-    const handleSubmitCompliance = () => {
-        if (!complianceForm.delivery_method) {
+    const handleSubmitLawEnforcement = () => {
+        if (!lawEnforcementForm.delivery_method) {
             return
         }
-        if (complianceForm.delivery_method === 'email' && !complianceForm.email) {
+        if (lawEnforcementForm.delivery_method === 'email' && !lawEnforcementForm.email) {
             return
         }
-        if (complianceForm.delivery_method === 'system' && !complianceForm.system_user) {
+        if (lawEnforcementForm.delivery_method === 'system' && !lawEnforcementForm.system_user) {
             return
         }
-        sendToComplianceMutation.mutate({
+        sendToLawEnforcementMutation.mutate({
             sar_id: selectedSAR?.sar_number,
-            ...complianceForm
+            ...lawEnforcementForm
         })
     }
 
@@ -120,8 +120,8 @@ const SAR = () => {
             {/* Page Title */}
             <div className="mb-4 flex items-center justify-between">
                 <div>
-                    <h4 className="text-base font-bold text-gray-900">SAR Filing</h4>
-                    <small className="text-gray-500 text-xs">Suspicious Activity Report filing and management</small>
+                    <h4 className="text-base font-bold text-gray-900">SAR</h4>
+                    <small className="text-gray-500 text-xs">Suspicious Activity Reports received from banks</small>
                 </div>
             </div>
 
@@ -227,6 +227,9 @@ const SAR = () => {
                                         ACTIVITY TYPE
                                     </th>
                                     <th className="px-2 md:px-3 py-1.5 md:py-2 text-left text-xs font-black uppercase tracking-wider whitespace-nowrap border-r border-gray-300" style={{ color: '#f3f4f6' }}>
+                                        BANK
+                                    </th>
+                                    <th className="px-2 md:px-3 py-1.5 md:py-2 text-left text-xs font-black uppercase tracking-wider whitespace-nowrap border-r border-gray-300" style={{ color: '#f3f4f6' }}>
                                         STATUS
                                     </th>
                                     <th className="px-2 md:px-3 py-1.5 md:py-2 text-left text-xs font-black uppercase tracking-wider whitespace-nowrap border-r border-gray-300" style={{ color: '#f3f4f6' }}>
@@ -244,13 +247,16 @@ const SAR = () => {
                                 {Array.from({ length: 25 }).map((_, index) => {
                                     const sar = sarReports[index];
                                     // Mock SAR data structure for display
+                                    // In production, this would come from the SAR API with bank information
+                                    const bankNames = ['First National Bank', 'Standard Chartered', 'CBZ Bank', 'Ecobank', 'Nedbank', 'Stanbic Bank', 'Barclays Bank', 'CABS'];
                                     const sarData = sar ? {
                                         sar_number: `SAR-${sar.id || index}`,
                                         subject: sar.customer_type === 'INDIVIDUAL' 
                                             ? `${sar.first_name || ''} ${sar.last_name || ''}`.trim() || 'N/A'
                                             : sar.company_name || 'N/A',
                                         activity_type: sar.is_sanctioned ? 'Sanctions Violation' : sar.is_pep ? 'Corruption' : 'Money Laundering',
-                                        status: 'DRAFT',
+                                        bank: bankNames[(sar.id || index) % bankNames.length], // Assign bank based on ID
+                                        status: 'FILED',
                                         priority: sar.risk_level === 'HIGH' ? 'URGENT' : sar.risk_level === 'MEDIUM' ? 'PRIORITY' : 'ROUTINE',
                                         filing_date: sar.updated_at ? new Date(sar.updated_at).toLocaleDateString() : 'N/A'
                                     } : null;
@@ -265,6 +271,9 @@ const SAR = () => {
                                             </td>
                                             <td className="px-2 md:px-3 py-1.5 md:py-2 text-xs text-gray-600 whitespace-nowrap truncate border-r border-gray-200" style={{ minHeight: '36px' }}>
                                                 {sarData?.activity_type || '\u00A0'}
+                                            </td>
+                                            <td className="px-2 md:px-3 py-1.5 md:py-2 text-xs text-gray-900 whitespace-nowrap border-r border-gray-200" style={{ minHeight: '36px' }}>
+                                                {sarData?.bank || '\u00A0'}
                                             </td>
                                             <td className="px-2 md:px-3 py-1.5 md:py-2 whitespace-nowrap border-r border-gray-200" style={{ minHeight: '36px' }}>
                                                 {sarData ? (
@@ -294,10 +303,10 @@ const SAR = () => {
                                                         </button>
                                                         <button className="text-gray-400">|</button>
                                                         <button 
-                                                            onClick={() => handleSendToCompliance(sarData)}
+                                                            onClick={() => handleSendToLawEnforcement(sarData)}
                                                             className="text-blue-600 hover:text-blue-800 text-xs font-medium"
                                                         >
-                                                            Send to Compliance
+                                                            Send to Law Enforcement
                                                         </button>
                                                     </div>
                                                 ) : '\u00A0'}
@@ -360,6 +369,10 @@ const SAR = () => {
                                         <p className="text-gray-900">{selectedSAR.activity_type || 'N/A'}</p>
                                     </div>
                                     <div>
+                                        <span className="font-medium text-gray-600">Bank:</span>
+                                        <p className="text-gray-900">{selectedSAR.bank || 'N/A'}</p>
+                                    </div>
+                                    <div>
                                         <span className="font-medium text-gray-600">Status:</span>
                                         <p>
                                             <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadgeClass(selectedSAR.status)}`}>
@@ -402,18 +415,18 @@ const SAR = () => {
                 </div>
             )}
 
-            {/* Send to Compliance Modal */}
-            {isComplianceModalOpen && selectedSAR && (
+            {/* Send to Law Enforcement Modal */}
+            {isLawEnforcementModalOpen && selectedSAR && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
                     <div className="bg-white shadow-xl w-full max-w-2xl max-h-[70vh] m-4 flex flex-col">
                         {/* Header - Sticky */}
                         <div className="bg-white border-b border-gray-200 shadow px-3 py-2 flex items-center justify-between flex-shrink-0">
-                            <h3 className="text-lg font-semibold text-gray-900">Send to Compliance Board</h3>
+                            <h3 className="text-lg font-semibold text-gray-900">Send to Law Enforcement</h3>
                             <button
                                 onClick={() => {
-                                    setIsComplianceModalOpen(false)
+                                    setIsLawEnforcementModalOpen(false)
                                     setSelectedSAR(null)
-                                    resetComplianceForm()
+                                    resetLawEnforcementForm()
                                 }}
                                 className="text-gray-400 hover:text-gray-600"
                             >
@@ -432,6 +445,7 @@ const SAR = () => {
                                     <div><span className="font-medium">SAR Number:</span> {selectedSAR.sar_number}</div>
                                     <div><span className="font-medium">Subject:</span> {selectedSAR.subject}</div>
                                     <div><span className="font-medium">Activity Type:</span> {selectedSAR.activity_type}</div>
+                                    <div><span className="font-medium">Bank:</span> {selectedSAR.bank || 'N/A'}</div>
                                 </div>
                             </div>
 
@@ -441,8 +455,8 @@ const SAR = () => {
                                     Delivery Method <span className="text-red-500">*</span>
                                 </label>
                                 <select
-                                    value={complianceForm.delivery_method}
-                                    onChange={(e) => setComplianceForm({ ...complianceForm, delivery_method: e.target.value, email: '', system_user: '' })}
+                                    value={lawEnforcementForm.delivery_method}
+                                    onChange={(e) => setLawEnforcementForm({ ...lawEnforcementForm, delivery_method: e.target.value, email: '', system_user: '' })}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 >
                                     <option value="">Select delivery method</option>
@@ -452,33 +466,33 @@ const SAR = () => {
                             </div>
 
                             {/* Email Field - shown when delivery method is email */}
-                            {complianceForm.delivery_method === 'email' && (
+                            {lawEnforcementForm.delivery_method === 'email' && (
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">
                                         Email Address <span className="text-red-500">*</span>
                                     </label>
                                     <input
                                         type="email"
-                                        value={complianceForm.email}
-                                        onChange={(e) => setComplianceForm({ ...complianceForm, email: e.target.value })}
+                                        value={lawEnforcementForm.email}
+                                        onChange={(e) => setLawEnforcementForm({ ...lawEnforcementForm, email: e.target.value })}
                                         className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        placeholder="compliance@example.com"
+                                        placeholder="lawenforcement@example.com"
                                     />
                                 </div>
                             )}
 
                             {/* System User Field - shown when delivery method is system */}
-                            {complianceForm.delivery_method === 'system' && (
+                            {lawEnforcementForm.delivery_method === 'system' && (
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">
                                         System User <span className="text-red-500">*</span>
                                     </label>
                                     <input
                                         type="text"
-                                        value={complianceForm.system_user}
-                                        onChange={(e) => setComplianceForm({ ...complianceForm, system_user: e.target.value })}
+                                        value={lawEnforcementForm.system_user}
+                                        onChange={(e) => setLawEnforcementForm({ ...lawEnforcementForm, system_user: e.target.value })}
                                         className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        placeholder="Enter username or user ID in the compliance system"
+                                        placeholder="Enter username or user ID in the law enforcement system"
                                     />
                                 </div>
                             )}
@@ -490,8 +504,8 @@ const SAR = () => {
                                 </label>
                                 <input
                                     type="text"
-                                    value={complianceForm.recipient_name}
-                                    onChange={(e) => setComplianceForm({ ...complianceForm, recipient_name: e.target.value })}
+                                    value={lawEnforcementForm.recipient_name}
+                                    onChange={(e) => setLawEnforcementForm({ ...lawEnforcementForm, recipient_name: e.target.value })}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     placeholder="Enter recipient name"
                                 />
@@ -504,8 +518,8 @@ const SAR = () => {
                                 </label>
                                 <input
                                     type="text"
-                                    value={complianceForm.recipient_organization}
-                                    onChange={(e) => setComplianceForm({ ...complianceForm, recipient_organization: e.target.value })}
+                                    value={lawEnforcementForm.recipient_organization}
+                                    onChange={(e) => setLawEnforcementForm({ ...lawEnforcementForm, recipient_organization: e.target.value })}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     placeholder="Enter organization name"
                                 />
@@ -517,8 +531,8 @@ const SAR = () => {
                                     Additional Notes <span className="text-gray-500">(optional)</span>
                                 </label>
                                 <textarea
-                                    value={complianceForm.notes}
-                                    onChange={(e) => setComplianceForm({ ...complianceForm, notes: e.target.value })}
+                                    value={lawEnforcementForm.notes}
+                                    onChange={(e) => setLawEnforcementForm({ ...lawEnforcementForm, notes: e.target.value })}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[100px]"
                                     placeholder="Enter any additional notes or instructions..."
                                     rows="4"
@@ -526,12 +540,12 @@ const SAR = () => {
                             </div>
 
                             {/* Error Message */}
-                            {sendToComplianceMutation.isError && (
+                            {sendToLawEnforcementMutation.isError && (
                                 <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded text-sm">
-                                    {sendToComplianceMutation.error?.response?.data?.detail ||
-                                        sendToComplianceMutation.error?.response?.data?.message ||
-                                        sendToComplianceMutation.error?.message ||
-                                        'Failed to send SAR to compliance board. Please try again.'}
+                                    {sendToLawEnforcementMutation.error?.response?.data?.detail ||
+                                        sendToLawEnforcementMutation.error?.response?.data?.message ||
+                                        sendToLawEnforcementMutation.error?.message ||
+                                        'Failed to send SAR to law enforcement. Please try again.'}
                                 </div>
                             )}
                         </div>
@@ -543,9 +557,9 @@ const SAR = () => {
                             <button
                                 type="button"
                                 onClick={() => {
-                                    setIsComplianceModalOpen(false)
+                                    setIsLawEnforcementModalOpen(false)
                                     setSelectedSAR(null)
-                                    resetComplianceForm()
+                                    resetLawEnforcementForm()
                                 }}
                                 className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
                             >
@@ -553,21 +567,22 @@ const SAR = () => {
                             </button>
                             <button
                                 type="button"
-                                onClick={handleSubmitCompliance}
+                                onClick={handleSubmitLawEnforcement}
                                 disabled={
-                                    sendToComplianceMutation.isLoading || 
-                                    !complianceForm.delivery_method || 
-                                    (complianceForm.delivery_method === 'email' && !complianceForm.email) ||
-                                    (complianceForm.delivery_method === 'system' && !complianceForm.system_user)
+                                    sendToLawEnforcementMutation.isLoading || 
+                                    !lawEnforcementForm.delivery_method || 
+                                    (lawEnforcementForm.delivery_method === 'email' && !lawEnforcementForm.email) ||
+                                    (lawEnforcementForm.delivery_method === 'system' && !lawEnforcementForm.system_user)
                                 }
                                 className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                {sendToComplianceMutation.isLoading ? 'Sending...' : 'Send to Compliance'}
+                                {sendToLawEnforcementMutation.isLoading ? 'Sending...' : 'Send to Law Enforcement'}
                             </button>
                         </div>
                     </div>
                 </div>
             )}
+
         </div>
     )
 }

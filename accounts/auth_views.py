@@ -30,6 +30,7 @@ def current_user(request):
         'name': f'{user.first_name} {user.last_name}'.strip() or user.username,
         'is_staff': user.is_staff,
         'is_superuser': user.is_superuser,
+        'role': getattr(user, 'role', 'VIEWER'),  # Get role from CustomUser model
     })
 
 @api_view(['POST'])

@@ -161,7 +161,7 @@ const Dashboard = () => {
             y: {
                 beginAtZero: true,
                 ticks: {
-                    callback: function(value) {
+                    callback: function (value) {
                         return value.toLocaleString();
                     }
                 }
@@ -185,7 +185,7 @@ const Dashboard = () => {
             x: {
                 beginAtZero: true,
                 ticks: {
-                    callback: function(value) {
+                    callback: function (value) {
                         return value.toLocaleString();
                     }
                 }
@@ -209,7 +209,7 @@ const Dashboard = () => {
     }
 
     return (
-        <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
+        <div className="flex flex-col flex-1 min-h-0">
             {/* Page Title */}
             <div className="mb-4 flex items-center justify-between">
                 <div>
@@ -219,9 +219,9 @@ const Dashboard = () => {
             </div>
 
             {/* Critical Stats Overview */}
-            <div className="flex gap-3 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
                 {/* Total Transactions */}
-                <div className="flex-1 bg-white rounded-lg p-3 shadow-md relative">
+                <div className="bg-white rounded-lg p-3 shadow-md relative">
                     <div className="absolute top-3 right-3">
                         <div className="bg-blue-100 text-blue-600 w-8 h-8 rounded-lg flex items-center justify-center">
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -235,9 +235,9 @@ const Dashboard = () => {
                         <p className="text-xs text-green-600 mt-0.5">↑ 12.5% from last month</p>
                     </div>
                 </div>
-                
+
                 {/* High Risk Alerts */}
-                <div className="flex-1 bg-white rounded-lg p-3 shadow-md relative">
+                <div className="bg-white rounded-lg p-3 shadow-md relative">
                     <div className="absolute top-3 right-3">
                         <div className="bg-red-100 text-red-600 w-8 h-8 rounded-lg flex items-center justify-center">
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -251,9 +251,9 @@ const Dashboard = () => {
                         <p className="text-xs text-red-600 mt-0.5">↑ 8 new today</p>
                     </div>
                 </div>
-                
+
                 {/* Pending SARs */}
-                <div className="flex-1 bg-white rounded-lg p-3 shadow-md relative">
+                <div className="bg-white rounded-lg p-3 shadow-md relative">
                     <div className="absolute top-3 right-3">
                         <div className="bg-yellow-100 text-yellow-600 w-8 h-8 rounded-lg flex items-center justify-center">
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -267,9 +267,9 @@ const Dashboard = () => {
                         <p className="text-xs text-yellow-600 mt-0.5">5 due this week</p>
                     </div>
                 </div>
-                
+
                 {/* Active Cases */}
-                <div className="flex-1 bg-white rounded-lg p-3 shadow-md relative">
+                <div className="bg-white rounded-lg p-3 shadow-md relative">
                     <div className="absolute top-3 right-3">
                         <div className="bg-purple-100 text-purple-600 w-8 h-8 rounded-lg flex items-center justify-center">
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -286,15 +286,15 @@ const Dashboard = () => {
             </div>
 
             {/* Main Charts Row */}
-            <div className="flex gap-3 mb-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
                 {/* Transaction Volume Trend */}
-                <div className="flex-1 bg-white rounded-lg p-3 shadow-md">
-                    <div className="flex items-center justify-between mb-3">
+                <div className="bg-white rounded-lg p-3 shadow-md">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3">
                         <div>
                             <h6 className="text-sm font-semibold text-gray-900">Transaction Volume Trend</h6>
                             <p className="text-xs text-gray-500 mt-1">Last 30 days</p>
                         </div>
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 mt-2 sm:mt-0">
                             <span className="px-2 py-1 bg-blue-100 text-blue-600 text-xs rounded">Daily</span>
                         </div>
                     </div>
@@ -302,9 +302,9 @@ const Dashboard = () => {
                         <Line data={transactionVolumeData} options={lineChartOptions} />
                     </div>
                 </div>
-                
+
                 {/* Alert Trends */}
-                <div className="flex-1 bg-white rounded-lg p-3 shadow-md">
+                <div className="bg-white rounded-lg p-3 shadow-md">
                     <div className="flex items-center justify-between mb-3">
                         <div>
                             <h6 className="text-sm font-semibold text-gray-900">Alert Distribution</h6>
@@ -318,9 +318,9 @@ const Dashboard = () => {
             </div>
 
             {/* Second Charts Row */}
-            <div className="flex gap-3 mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
                 {/* Risk Score Distribution */}
-                <div className="flex-1 bg-white rounded-lg p-3 shadow-md">
+                <div className="bg-white rounded-lg p-3 shadow-md">
                     <h6 className="text-sm font-semibold text-gray-900 mb-3">Customer Risk Distribution</h6>
                     <div style={{ height: '200px' }}>
                         <Doughnut data={riskDistributionData} options={chartOptions} />
@@ -349,9 +349,9 @@ const Dashboard = () => {
                         </div>
                     </div>
                 </div>
-                
+
                 {/* Case Status */}
-                <div className="flex-1 bg-white rounded-lg p-3 shadow-md">
+                <div className="bg-white rounded-lg p-3 shadow-md">
                     <h6 className="text-sm font-semibold text-gray-900 mb-3">Case Status Overview</h6>
                     <div style={{ height: '200px' }}>
                         <Pie data={caseStatusData} options={chartOptions} />
@@ -380,9 +380,9 @@ const Dashboard = () => {
                         </div>
                     </div>
                 </div>
-                
+
                 {/* KYC Status */}
-                <div className="flex-1 bg-white rounded-lg p-3 shadow-md">
+                <div className="bg-white rounded-lg p-3 shadow-md">
                     <h6 className="text-sm font-semibold text-gray-900 mb-3">KYC Verification Status</h6>
                     <div style={{ height: '200px' }}>
                         <Doughnut data={kycStatusData} options={chartOptions} />
@@ -414,21 +414,21 @@ const Dashboard = () => {
             </div>
 
             {/* SAR Filing Trends and ML Performance */}
-            <div className="flex gap-3 mb-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
                 {/* SAR Filing Trends */}
-                <div className="flex-1 bg-white rounded-lg p-3 shadow-md">
+                <div className="bg-white rounded-lg p-3 shadow-md">
                     <h6 className="text-sm font-semibold text-gray-900 mb-3">SAR Filing Trends</h6>
                     <div style={{ height: '200px' }}>
                         <Line data={sarTrendsData} options={sarChartOptions} />
                     </div>
                 </div>
-                
+
                 {/* ML Model Performance */}
-                <div className="flex-1 bg-white rounded-lg p-3 shadow-md">
+                <div className="bg-white rounded-lg p-3 shadow-md">
                     <h6 className="text-sm font-semibold text-gray-900 mb-3">ML Model Performance</h6>
                     <div className="space-y-4">
                         <div>
-                            <div className="flex justify-between text-xs mb-2">
+                            <div className="flex flex-col sm:flex-row sm:justify-between text-xs mb-2 gap-1 sm:gap-0">
                                 <span className="text-gray-600 font-medium">Risk Scoring Model</span>
                                 <span className="font-semibold text-green-600">94.2% Accuracy</span>
                             </div>
@@ -437,7 +437,7 @@ const Dashboard = () => {
                             </div>
                         </div>
                         <div>
-                            <div className="flex justify-between text-xs mb-2">
+                            <div className="flex flex-col sm:flex-row sm:justify-between text-xs mb-2 gap-1 sm:gap-0">
                                 <span className="text-gray-600 font-medium">Anomaly Detection</span>
                                 <span className="font-semibold text-green-600">92.7% Accuracy</span>
                             </div>
@@ -446,7 +446,7 @@ const Dashboard = () => {
                             </div>
                         </div>
                         <div>
-                            <div className="flex justify-between text-xs mb-2">
+                            <div className="flex flex-col sm:flex-row sm:justify-between text-xs mb-2 gap-1 sm:gap-0">
                                 <span className="text-gray-600 font-medium">Pattern Recognition</span>
                                 <span className="font-semibold text-blue-600">89.3% Accuracy</span>
                             </div>
@@ -455,7 +455,7 @@ const Dashboard = () => {
                             </div>
                         </div>
                         <div>
-                            <div className="flex justify-between text-xs mb-2">
+                            <div className="flex flex-col sm:flex-row sm:justify-between text-xs mb-2 gap-1 sm:gap-0">
                                 <span className="text-gray-600 font-medium">Transaction Classifier</span>
                                 <span className="font-semibold text-yellow-600">86.5% Accuracy</span>
                             </div>
@@ -469,76 +469,74 @@ const Dashboard = () => {
 
             {/* Recent High Priority Alerts */}
             <div className="bg-white rounded-lg p-3 shadow-md mb-4">
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 gap-2">
                     <h6 className="text-sm font-semibold text-gray-900">High Priority Alerts</h6>
                     <a href="/alerts" className="text-xs text-blue-600 hover:text-blue-700 font-medium">View All →</a>
                 </div>
-                <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
+                <div className="overflow-x-auto -mx-3 px-3">
+                    <table className="w-full text-xs min-w-[600px]">
                         <thead>
                             <tr className="border-b border-gray-200">
                                 <th className="text-left py-3 px-2 font-semibold text-gray-700">Alert ID</th>
                                 <th className="text-left py-3 px-2 font-semibold text-gray-700">Type</th>
-                                <th className="text-left py-3 px-2 font-semibold text-gray-700">Customer</th>
+                                <th className="text-left py-3 px-2 font-semibold text-gray-700 hidden sm:table-cell">Customer</th>
                                 <th className="text-left py-3 px-2 font-semibold text-gray-700">Risk Level</th>
-                                <th className="text-left py-3 px-2 font-semibold text-gray-700">Status</th>
-                                <th className="text-left py-3 px-2 font-semibold text-gray-700">Date</th>
+                                <th className="text-left py-3 px-2 font-semibold text-gray-700 hidden md:table-cell">Status</th>
+                                <th className="text-left py-3 px-2 font-semibold text-gray-700 hidden lg:table-cell">Date</th>
                             </tr>
                         </thead>
                         <tbody>
                             {alertsData?.results?.slice(0, 5).map((alert, idx) => (
                                 <tr key={alert.id || idx} className="border-b border-gray-100 hover:bg-gray-50">
-                                    <td className="py-3 px-2 font-mono">{alert.alert_id || `#ALT-${8900 + idx}`}</td>
+                                    <td className="py-3 px-2 font-mono text-xs">{alert.alert_id || `#ALT-${8900 + idx}`}</td>
                                     <td className="py-3 px-2">{alert.alert_type || 'Large Cash Deposit'}</td>
-                                    <td className="py-3 px-2">{alert.customer_name || 'John Smith'}</td>
+                                    <td className="py-3 px-2 hidden sm:table-cell">{alert.customer_name || 'John Smith'}</td>
                                     <td className="py-3 px-2">
-                                        <span className={`px-2 py-1 rounded-full text-xs ${
-                                            alert.severity === 'HIGH' || alert.severity === 'CRITICAL' 
-                                                ? 'bg-red-100 text-red-700' 
-                                                : 'bg-orange-100 text-orange-700'
-                                        }`}>
+                                        <span className={`px-2 py-1 rounded-full text-xs ${alert.severity === 'HIGH' || alert.severity === 'CRITICAL'
+                                            ? 'bg-red-100 text-red-700'
+                                            : 'bg-orange-100 text-orange-700'
+                                            }`}>
                                             {alert.severity || 'High'}
                                         </span>
                                     </td>
-                                    <td className="py-3 px-2">
-                                        <span className={`px-2 py-1 rounded-full text-xs ${
-                                            alert.status === 'NEW' ? 'bg-yellow-100 text-yellow-700' :
+                                    <td className="py-3 px-2 hidden md:table-cell">
+                                        <span className={`px-2 py-1 rounded-full text-xs ${alert.status === 'NEW' ? 'bg-yellow-100 text-yellow-700' :
                                             alert.status === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-700' :
-                                            'bg-red-100 text-red-700'
-                                        }`}>
+                                                'bg-red-100 text-red-700'
+                                            }`}>
                                             {alert.status || 'Pending'}
                                         </span>
                                     </td>
-                                    <td className="py-3 px-2 text-gray-500">
+                                    <td className="py-3 px-2 text-gray-500 hidden lg:table-cell">
                                         {alert.triggered_at ? new Date(alert.triggered_at).toLocaleString() : '2 hours ago'}
                                     </td>
                                 </tr>
                             )) || (
-                                <tr>
-                                    <td colSpan="6" className="py-4 text-center text-gray-500">No alerts available</td>
-                                </tr>
-                            )}
+                                    <tr>
+                                        <td colSpan="6" className="py-4 text-center text-gray-500">No alerts available</td>
+                                    </tr>
+                                )}
                         </tbody>
                     </table>
                 </div>
             </div>
 
             {/* Transaction Geography and System Health */}
-            <div className="flex gap-3 mb-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-8">
                 {/* Top Transaction Regions */}
-                <div className="flex-1 bg-white rounded-lg p-3 shadow-md">
+                <div className="bg-white rounded-lg p-3 shadow-md">
                     <h6 className="text-sm font-semibold text-gray-900 mb-3">Top Transaction Regions</h6>
                     <div style={{ height: '200px' }}>
                         <Bar data={regionData} options={horizontalBarOptions} />
                     </div>
                 </div>
-                
+
                 {/* System Health Metrics */}
-                <div className="flex-1 bg-white rounded-lg p-3 shadow-md">
+                <div className="bg-white rounded-lg p-3 shadow-md">
                     <h6 className="text-sm font-semibold text-gray-900 mb-3">System Health Metrics</h6>
                     <div className="space-y-4">
                         <div>
-                            <div className="flex justify-between text-xs mb-2">
+                            <div className="flex flex-col sm:flex-row sm:justify-between text-xs mb-2 gap-1 sm:gap-0">
                                 <span className="text-gray-600">API Response Time</span>
                                 <span className="font-semibold text-green-600">45ms - Excellent</span>
                             </div>
@@ -547,7 +545,7 @@ const Dashboard = () => {
                             </div>
                         </div>
                         <div>
-                            <div className="flex justify-between text-xs mb-2">
+                            <div className="flex flex-col sm:flex-row sm:justify-between text-xs mb-2 gap-1 sm:gap-0">
                                 <span className="text-gray-600">Database Performance</span>
                                 <span className="font-semibold text-green-600">98% - Optimal</span>
                             </div>
@@ -556,7 +554,7 @@ const Dashboard = () => {
                             </div>
                         </div>
                         <div>
-                            <div className="flex justify-between text-xs mb-2">
+                            <div className="flex flex-col sm:flex-row sm:justify-between text-xs mb-2 gap-1 sm:gap-0">
                                 <span className="text-gray-600">Processing Queue</span>
                                 <span className="font-semibold text-blue-600">234 jobs - Normal</span>
                             </div>
@@ -565,7 +563,7 @@ const Dashboard = () => {
                             </div>
                         </div>
                         <div>
-                            <div className="flex justify-between text-xs mb-2">
+                            <div className="flex flex-col sm:flex-row sm:justify-between text-xs mb-2 gap-1 sm:gap-0">
                                 <span className="text-gray-600">System Uptime</span>
                                 <span className="font-semibold text-green-600">99.98% - 45 days</span>
                             </div>

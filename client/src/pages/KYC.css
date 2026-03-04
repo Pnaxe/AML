@@ -1,0 +1,525 @@
+/* Onboarding workflow page - extends shared Customers.css; pixel-perfect to Customers */
+.onboarding-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.onboarding-action-btn {
+  border: 1px solid var(--border-color);
+  background: #ffffff;
+  color: var(--text-primary);
+  border-radius: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--font-family);
+}
+
+.onboarding-action-btn:hover {
+  border-color: var(--sidebar-active);
+  color: var(--sidebar-active);
+}
+
+.onboarding-action-btn.reject {
+  border-color: #b91c1c;
+  color: #b91c1c;
+}
+
+.onboarding-action-btn.reject:hover {
+  background: #fee2e2;
+}
+
+.modal-textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.reports-container .modal-panel {
+  max-width: 920px;
+}
+
+.reports-container .kyc-add-modal {
+  min-height: 70vh;
+  max-height: 90vh;
+}
+
+.reports-container .kyc-add-modal .modal-body {
+  min-height: 50vh;
+  flex: 1 1 auto;
+}
+
+.reports-container .individual-kyc-form,
+.reports-container .business-kyc-form {
+  flex-shrink: 0;
+  display: block;
+}
+
+.modal-section-purpose {
+  margin: 0 0 var(--space-2) 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.view-profile-section-purpose {
+  margin: 0 0 var(--space-2) 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.reports-container .modal-two-column>.modal-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.modal-form-intro {
+  margin: 0 0 var(--space-2) 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.modal-section-title {
+  margin: var(--space-3) 0 var(--space-1) 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.modal-section-title:first-of-type {
+  margin-top: var(--space-2);
+}
+
+.modal-file-name {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Red star for optional (non-compulsory) fields */
+.field-optional-star {
+  color: #dc2626;
+  font-weight: 700;
+  margin-left: 2px;
+}
+
+.modal-optional-legend {
+  margin: 0 0 var(--space-2) 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.modal-view-value {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.modal-check-field {
+  display: flex;
+  align-items: center;
+}
+
+.modal-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+/* View Profile – full page with table-sized card (same as Customers) */
+.view-profile-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+/* Same size/behavior as customers-table-card-outer */
+.view-profile-card-outer {
+  background: #ffffff;
+  border-radius: var(--space-1);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.view-profile-card-inner {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.view-profile-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Documents & images section */
+.view-profile-documents {
+  padding: var(--space-3);
+}
+
+.view-profile-no-docs {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+  padding: var(--space-2) 0;
+}
+
+.view-profile-docs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-2);
+}
+
+.view-profile-doc-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border-color);
+  border-radius: var(--space-1);
+  background: var(--card-bg);
+}
+
+.view-profile-doc-icon {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: #f1f5f9;
+  border-radius: var(--space-1);
+}
+
+.view-profile-doc-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.view-profile-doc-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.view-profile-doc-filename {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.view-profile-doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.view-profile-doc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--space-1);
+  border: 1px solid transparent;
+  cursor: pointer;
+  background: transparent;
+  font-family: inherit;
+}
+
+.view-profile-doc-btn-view {
+  color: var(--sidebar-active, #7c3aed);
+  border-color: var(--sidebar-active, #7c3aed);
+}
+
+.view-profile-doc-btn-view:hover {
+  background: rgba(124, 58, 237, 0.08);
+}
+
+.view-profile-doc-btn-download {
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+
+.view-profile-doc-btn-download:hover {
+  background: #f1f5f9;
+}
+
+/* View document modal */
+.view-profile-doc-modal {
+  max-width: 480px;
+}
+
+.view-profile-doc-modal-filename {
+  margin: 0 0 var(--space-2) 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.view-profile-doc-preview-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: #f8fafc;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--space-1);
+  color: var(--text-secondary);
+  font-size: 14px;
+  text-align: center;
+}
+
+.view-profile-doc-preview-placeholder svg {
+  color: var(--text-secondary);
+}
+
+.view-profile-section {
+  background: var(--card-bg);
+  border-radius: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+/* Screening report variant – lighter sections without hard borders */
+.screening-report .view-profile-card-outer {
+  background: #ffffff;
+  border-radius: var(--space-1);
+  border: none;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.screening-report .view-profile-card-inner {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+}
+
+.screening-report .view-profile-section {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0 0 var(--space-4) 0;
+}
+
+.screening-report .view-profile-section-title {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: var(--space-2);
+}
+
+.screening-report .view-profile-body {
+  flex: 1;
+}
+
+.screening-report-footer {
+  margin-top: var(--space-2);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.view-profile-section-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 var(--space-2) 0;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.view-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-2);
+}
+
+.view-profile-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.view-profile-field-full {
+  grid-column: 1 / -1;
+}
+
+.view-profile-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.view-profile-value {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.view-profile-value-block {
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.view-profile-actions .view-profile-section-title {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: var(--space-2);
+}
+
+.view-profile-decision-intro {
+  margin: 0 0 var(--space-3) 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.view-profile-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* Icons with colors across KYC page */
+.btn-with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.btn-with-icon .icon-primary {
+  color: #ffffff;
+}
+
+.btn-with-icon .icon-success {
+  color: #166534;
+}
+
+.btn-danger-action.btn-with-icon .icon-danger {
+  color: #ffffff;
+}
+
+.view-profile-buttons .btn-primary-action.btn-with-icon .icon-success {
+  color: #ffffff;
+}
+
+.modal-title-with-icon {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.modal-title-with-icon .icon-success {
+  color: #15803d;
+  flex-shrink: 0;
+}
+
+.modal-title-with-icon .icon-danger {
+  color: #b91c1c;
+  flex-shrink: 0;
+}
+
+/* Table: Docs and Decision badges with colored icons */
+.docs-badge,
+.decision-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.docs-badge-submitted {
+  color: #166534;
+}
+
+.docs-badge-submitted svg {
+  color: #15803d;
+  flex-shrink: 0;
+}
+
+.docs-badge-missing {
+  color: #92400e;
+}
+
+.docs-badge-missing svg {
+  color: #b45309;
+  flex-shrink: 0;
+}
+
+.decision-badge-pending {
+  color: #92400e;
+}
+
+.decision-badge-pending svg {
+  color: #b45309;
+  flex-shrink: 0;
+}
+
+.decision-badge-approved {
+  color: #166534;
+}
+
+.decision-badge-approved svg {
+  color: #15803d;
+  flex-shrink: 0;
+}
+
+.decision-badge-rejected {
+  color: #b91c1c;
+}
+
+.decision-badge-rejected svg {
+  color: #b91c1c;
+  flex-shrink: 0;
+}
+
+/* Search icon tint */
+.report-filters .search-icon {
+  color: var(--sidebar-active, #7c3aed);
+}
+
+.report-filters .search-icon svg {
+  color: inherit;
+}
+
+@media (max-width: 900px) {
+  .reports-container .modal-panel {
+    max-width: calc(100vw - 24px);
+  }
+
+  .reports-container .modal-two-column {
+    flex-direction: column;
+  }
+}

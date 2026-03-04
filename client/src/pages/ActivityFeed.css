@@ -1,0 +1,164 @@
+.activity-feed-page {
+  padding: 2px 0 0;
+}
+
+.activity-feed-title {
+  margin: 0 0 10px;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: 0;
+}
+
+.activity-feed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.activity-feed-card {
+  width: 100%;
+  border: 1px solid #e3e8f1;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.activity-feed-card:hover {
+  border-color: #c9d4e7;
+  background: #fbfcff;
+}
+
+.activity-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.activity-icon-takeover {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.activity-icon-hot-lead {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+.activity-icon-bot-replied {
+  background: #e0e7ff;
+  color: #4f46e5;
+}
+
+.activity-icon-new-conversation {
+  background: #ede9fe;
+  color: #7c3aed;
+}
+
+.activity-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.activity-item-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.activity-item-actor {
+  margin-top: 2px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  line-height: 1.15;
+}
+
+.activity-item-detail {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.2;
+}
+
+.activity-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #8fa3c2;
+  flex-shrink: 0;
+}
+
+.activity-time {
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.activity-arrow {
+  color: #7f94b4;
+}
+
+.activity-feed-card-skeleton {
+  cursor: default;
+}
+
+.activity-icon-skeleton {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.activity-line-skeleton {
+  height: 10px;
+  border-radius: 999px;
+}
+
+.activity-line-skeleton-title {
+  width: 180px;
+}
+
+.activity-line-skeleton-actor {
+  width: 120px;
+  margin-top: 6px;
+}
+
+.activity-line-skeleton-detail {
+  width: 260px;
+  margin-top: 6px;
+}
+
+.activity-time-skeleton {
+  width: 70px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+@media (max-width: 768px) {
+  .activity-feed-title {
+    font-size: 20px;
+  }
+
+  .activity-item-title {
+    font-size: 15px;
+  }
+
+  .activity-item-actor {
+    font-size: 14px;
+  }
+
+  .activity-item-detail {
+    font-size: 14px;
+  }
+}

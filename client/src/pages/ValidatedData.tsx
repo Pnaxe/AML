@@ -33,6 +33,7 @@ type Paged<T> = { results?: T[] } | T[]
 
 const PAGE_SIZE = 25
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api'
+const VALIDATED_DATA_CACHE_KEY = 'aml_validated_data_cache'
 
 function rowsOf<T>(payload: Paged<T>): T[] {
   return Array.isArray(payload) ? payload : payload.results ?? []
@@ -223,7 +224,17 @@ export const ValidatedData: React.FC<ValidatedDataProps> = ({ selectedDataset })
 
   useEffect(() => {
     const loadCorrections = async () => {
+      const cachedValue = sessionStorage.getItem(VALIDATED_DATA_CACHE_KEY)
       setLoading(true)
+      if (cachedValue) {
+        try {
+          const parsed = JSON.parse(cachedValue) as { rows: CorrectionRow[]; datasetTables: Record<string, DatasetTable> }
+          setRows(parsed.rows)
+          setDatasetTables(parsed.datasetTables)
+        } catch {
+          sessionStorage.removeItem(VALIDATED_DATA_CACHE_KEY)
+        }
+      }
       setError(null)
       try {
         const [transactionsRes, customersRes, alertsRes] = await Promise.all([
@@ -246,12 +257,20 @@ export const ValidatedData: React.FC<ValidatedDataProps> = ({ selectedDataset })
         const customers = rowsOf<GenericRecord>(customersPayload)
         const alerts = rowsOf<GenericRecord>(alertsPayload)
 
-        setDatasetTables(buildDatasetTables(transactions, customers, alerts))
-        setRows(buildCorrectionRows(transactions, customers, alerts))
+        const nextDatasetTables = buildDatasetTables(transactions, customers, alerts)
+        const nextRows = buildCorrectionRows(transactions, customers, alerts)
+        setDatasetTables(nextDatasetTables)
+        setRows(nextRows)
+        sessionStorage.setItem(
+          VALIDATED_DATA_CACHE_KEY,
+          JSON.stringify({ rows: nextRows, datasetTables: nextDatasetTables }),
+        )
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Unable to load correction data')
-        setDatasetTables({})
-        setRows([])
+        if (!cachedValue) {
+          setError(e instanceof Error ? e.message : 'Unable to load correction data')
+          setDatasetTables({})
+          setRows([])
+        }
       } finally {
         setLoading(false)
       }
@@ -605,3 +624,11 @@ export const ValidatedData: React.FC<ValidatedDataProps> = ({ selectedDataset })
                 </div>
               ) : (
                 <span>All data displayed</span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

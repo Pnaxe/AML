@@ -25,6 +25,7 @@ type DatasetFile = { dataset_file: string; size_bytes: number; uploaded_at: stri
 
 const PAGE_SIZE = 25
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api'
+const DATA_MANAGEMENT_CACHE_KEY = 'aml_data_management_assets_cache'
 
 type DataManagementProps = {
   onOpenDatasetForCorrection?: (datasetName: string) => void
@@ -138,7 +139,15 @@ export const DataManagement: React.FC<DataManagementProps> = ({ onOpenDatasetFor
   if (token) authHeaders.Authorization = `Token ${token}`
 
   const loadAssets = async () => {
+    const cachedValue = sessionStorage.getItem(DATA_MANAGEMENT_CACHE_KEY)
     setLoading(true)
+    if (cachedValue) {
+      try {
+        setAssets(JSON.parse(cachedValue) as DataAsset[])
+      } catch {
+        sessionStorage.removeItem(DATA_MANAGEMENT_CACHE_KEY)
+      }
+    }
     setError(null)
     try {
       const [transactionsRes, customersRes, alertsRes, sourcesRes, datasetsRes] = await Promise.all([
@@ -161,18 +170,20 @@ export const DataManagement: React.FC<DataManagementProps> = ({ onOpenDatasetFor
         datasetsRes.json(),
       ])
 
-      setAssets(
-        buildAssets(
-          rowsOf<GenericRecord>(transactionsPayload),
-          rowsOf<GenericRecord>(customersPayload),
-          rowsOf<GenericRecord>(alertsPayload),
-          rowsOf<GenericRecord>(sourcesPayload),
-          rowsOf<DatasetFile>(datasetsPayload),
-        ),
+      const nextAssets = buildAssets(
+        rowsOf<GenericRecord>(transactionsPayload),
+        rowsOf<GenericRecord>(customersPayload),
+        rowsOf<GenericRecord>(alertsPayload),
+        rowsOf<GenericRecord>(sourcesPayload),
+        rowsOf<DatasetFile>(datasetsPayload),
       )
+      setAssets(nextAssets)
+      sessionStorage.setItem(DATA_MANAGEMENT_CACHE_KEY, JSON.stringify(nextAssets))
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to load data assets')
-      setAssets([])
+      if (!cachedValue) {
+        setError(e instanceof Error ? e.message : 'Unable to load data assets')
+        setAssets([])
+      }
     } finally {
       setLoading(false)
     }
@@ -467,4 +478,14 @@ export const DataManagement: React.FC<DataManagementProps> = ({ onOpenDatasetFor
                 <button type="button" className="btn-secondary-action" onClick={handleCloseAddModal}>
                   Cancel
                 </button>
-                <button type="submit" className="
+                <button type="submit" className="btn-primary-action" disabled={loading || !uploadFile}>
+                  Upload Dataset
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

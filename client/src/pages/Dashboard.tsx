@@ -297,16 +297,14 @@ export const Dashboard: React.FC = () => {
   useEffect(() => {
     const loadDashboard = async () => {
       const cachedValue = sessionStorage.getItem(DASHBOARD_CACHE_KEY)
+      setLoading(true)
       if (cachedValue) {
         try {
           const parsed = JSON.parse(cachedValue) as OverviewResponse
           setData(parsed)
-          setLoading(false)
         } catch {
           sessionStorage.removeItem(DASHBOARD_CACHE_KEY)
         }
-      } else {
-        setLoading(true)
       }
       setError(null)
 
@@ -387,7 +385,7 @@ export const Dashboard: React.FC = () => {
           </>
         ) : (
           <>
-            <h1 className="dashboard-title">AML System Dashboard</h1>
+            <h1 className="dashboard-title">AfriSentry Dashboard</h1>
             <p className="dashboard-desc">Live overview of transactions, alerts, cases, customers, and deployed AML models.</p>
           </>
         )}
@@ -417,7 +415,7 @@ export const Dashboard: React.FC = () => {
                 <Icon size={22} />
               </div>
               <div className="dashboard-card-label">{card.label}</div>
-              <div className="dashboard-card-value">{loading ? '...' : card.value}</div>
+              <div className="dashboard-card-value">{card.value}</div>
               <div className={`dashboard-card-change ${card.trend}`}>{card.change}</div>
             </div>
           )

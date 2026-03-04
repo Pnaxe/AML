@@ -28,6 +28,7 @@ type DatasetFile = { dataset_file: string; size_bytes: number; uploaded_at: stri
 
 const PAGE_SIZE = 25
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api'
+const DATA_VALIDATION_CACHE_KEY = 'aml_data_validation_cache'
 
 function rowsOf<T>(payload: Paged<T>): T[] {
   return Array.isArray(payload) ? payload : payload.results ?? []
@@ -139,7 +140,17 @@ export const DataValidation: React.FC = () => {
 
   useEffect(() => {
     const loadDatasets = async () => {
+      const cachedValue = sessionStorage.getItem(DATA_VALIDATION_CACHE_KEY)
       setLoading(true)
+      if (cachedValue) {
+        try {
+          const parsed = JSON.parse(cachedValue) as DatasetValidation[]
+          setDatasets(parsed)
+          setSelectedFile((current) => current || parsed[0]?.file || '')
+        } catch {
+          sessionStorage.removeItem(DATA_VALIDATION_CACHE_KEY)
+        }
+      }
       setError(null)
       try {
         const [transactionsRes, customersRes, alertsRes, uploadedRes] = await Promise.all([
@@ -183,10 +194,13 @@ export const DataValidation: React.FC = () => {
         ]
 
         setDatasets(nextDatasets)
+        sessionStorage.setItem(DATA_VALIDATION_CACHE_KEY, JSON.stringify(nextDatasets))
         setSelectedFile((current) => current || nextDatasets[0]?.file || '')
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Unable to load validation datasets')
-        setDatasets([])
+        if (!cachedValue) {
+          setError(e instanceof Error ? e.message : 'Unable to load validation datasets')
+          setDatasets([])
+        }
       } finally {
         setLoading(false)
       }
@@ -326,7 +340,12 @@ export const DataValidation: React.FC = () => {
           </div>
         </div>
 
-        <div className="customers-table-card-outer">
+        <div className={`customers-table-card-outer ${!loading && !hasRun ? 'table-empty-state' : ''}`}>
+          {!loading && !hasRun && (
+            <div className="table-empty-watermark" aria-hidden="true">
+              Select a dataset and click "Run Validation" to view errors.
+            </div>
+          )}
           <div className="report-content-container ecl-table-container table-loading-shell">
             {loading && (
               <div className="table-loading-overlay" aria-hidden="true">
@@ -345,9 +364,7 @@ export const DataValidation: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {!loading && !hasRun ? (
-                  <tr><td colSpan={6} className="muted">Select a dataset and click "Run Validation" to view errors.</td></tr>
-                ) : pageIssues.length === 0 ? (
+                {!loading && !hasRun ? null : pageIssues.length === 0 ? (
                   !loading ? <tr><td colSpan={6} className="muted">No validation results found.</td></tr> : null
                 ) : (
                   pageIssues.map((issue) => (
@@ -397,4 +414,12 @@ export const DataValidation: React.FC = () => {
                   </button>
                 </div>
               ) : (
-                <span>All data d
+                <span>All data displayed</span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -814,4 +814,14 @@ export const Reports: React.FC<ReportsProps> = ({ variant = 'operational' }) => 
                 <button type="button" className="btn-secondary-action" onClick={() => setPreviewTarget(null)}>
                   Close
                 </button>
-                <button type="button" className="btn-primary-action" onClick={() => void handlePreviewDownload()} disabled={
+                <button type="button" className="btn-primary-action" onClick={() => void handlePreviewDownload()} disabled={loading}>
+                  Download
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

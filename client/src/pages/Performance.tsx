@@ -235,16 +235,14 @@ export const Performance: React.FC = () => {
   useEffect(() => {
     const loadPerformance = async () => {
       const cachedValue = sessionStorage.getItem(PERFORMANCE_CACHE_KEY)
+      setLoading(true)
       if (cachedValue) {
         try {
           const parsed = JSON.parse(cachedValue) as PerformanceResponse
           setData(parsed)
-          setLoading(false)
         } catch {
           sessionStorage.removeItem(PERFORMANCE_CACHE_KEY)
         }
-      } else {
-        setLoading(true)
       }
       setError(null)
 
@@ -325,7 +323,7 @@ export const Performance: React.FC = () => {
           </>
         ) : (
           <>
-            <h1 className="dashboard-title">AML Performance Overview</h1>
+            <h1 className="dashboard-title">AfriSentry Performance Overview</h1>
             <p className="dashboard-desc">Live operational performance across alerts, cases, transactions, SAR output, and model quality.</p>
           </>
         )}
@@ -355,7 +353,7 @@ export const Performance: React.FC = () => {
                 <Icon size={22} />
               </div>
               <div className="dashboard-card-label">{card.label}</div>
-              <div className="dashboard-card-value">{loading ? '...' : card.value}</div>
+              <div className="dashboard-card-value">{card.value}</div>
               <div className={`dashboard-card-change ${card.trend}`}>{card.change}</div>
             </div>
           )

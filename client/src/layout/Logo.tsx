@@ -7,10 +7,11 @@ type LogoProps = {
 
 export const Logo: React.FC<LogoProps> = ({ size = 'default' }) => {
   const height = size === 'small' ? 40 : 56
+
   return (
     <img
       src={logoSrc}
-      alt="AS Logo"
+      alt="AfriSentry Logo"
       className="logo-img"
       style={{ height, width: 'auto' }}
     />

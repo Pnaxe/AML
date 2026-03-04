@@ -132,16 +132,14 @@ export const ActivityFeed: React.FC = () => {
   useEffect(() => {
     const loadFeed = async () => {
       const cachedValue = sessionStorage.getItem(ACTIVITY_FEED_CACHE_KEY)
+      setLoading(true)
       if (cachedValue) {
         try {
           const parsed = JSON.parse(cachedValue) as ActivityItem[]
           setItems(parsed)
-          setLoading(false)
         } catch {
           sessionStorage.removeItem(ACTIVITY_FEED_CACHE_KEY)
         }
-      } else {
-        setLoading(true)
       }
       setError(null)
 
@@ -196,7 +194,7 @@ export const ActivityFeed: React.FC = () => {
       <h2 className="activity-feed-title">Recent activity</h2>
       {error && <div className="activity-item-detail">{error}</div>}
       <div className="activity-feed-list">
-        {loading &&
+        {loading && visibleItems.length === 0 &&
           skeletonRows.map((_, index) => (
             <div className="activity-feed-card activity-feed-card-skeleton" key={`skeleton-${index}`}>
               <div className="activity-icon-skeleton activity-skeleton-block" />

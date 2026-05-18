@@ -41,7 +41,7 @@ A comprehensive Django-based AML system with AI/ML capabilities for detecting su
 
 - **Backend**: Django 5.1.7
 - **API**: Django REST Framework 3.15.2
-- **Database**: PostgreSQL
+- **Database**: MySQL
 - **ML/AI**: NumPy, scikit-learn, Pandas
 - **Authentication**: Token-based authentication
 
@@ -49,7 +49,7 @@ A comprehensive Django-based AML system with AI/ML capabilities for detecting su
 
 ### Prerequisites
 - Python 3.10 or higher
-- PostgreSQL 12 or higher
+- MySQL 8.0 or higher
 - pip (Python package manager)
 
 ### 1. Clone the Repository
@@ -69,25 +69,26 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 4. Configure PostgreSQL Database
+### 4. Configure MySQL Database
 
-Create a PostgreSQL database:
+Create a MySQL database:
 ```sql
 CREATE DATABASE aml_database;
-CREATE USER postgres WITH PASSWORD 'your_password';
-GRANT ALL PRIVILEGES ON DATABASE aml_database TO postgres;
+CREATE USER 'aml_user'@'localhost' IDENTIFIED BY 'your_password';
+GRANT ALL PRIVILEGES ON aml_database.* TO 'aml_user'@'localhost';
+FLUSH PRIVILEGES;
 ```
 
 Update database credentials in `aml_system/settings.py`:
 ```python
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'aml_database',
-        'USER': 'postgres',
-        'PASSWORD': 'your_password',
-        'HOST': 'localhost',
-        'PORT': '5432',
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': os.getenv('DB_NAME', 'aml_database'),
+        'USER': os.getenv('DB_USER', 'root'),
+        'PASSWORD': os.getenv('DB_PASSWORD', ''),
+        'HOST': os.getenv('DB_HOST', '127.0.0.1'),
+        'PORT': os.getenv('DB_PORT', '3306'),
     }
 }
 ```

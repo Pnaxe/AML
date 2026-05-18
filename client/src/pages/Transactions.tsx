@@ -5,6 +5,7 @@ import {
   HiOutlineUpload,
   HiOutlineRefresh,
   HiOutlineShieldExclamation,
+  HiOutlineTrash,
 } from 'react-icons/hi'
 import './Customers.css'
 
@@ -22,6 +23,7 @@ type TransactionRow = {
   risk_score: number
   is_suspicious: boolean
   transaction_date: string
+  created_at?: string
 }
 
 type TransactionResponse = { count?: number; results?: TransactionRow[] } | TransactionRow[]
@@ -58,14 +60,24 @@ type StreamTransactionPayload = {
   receiver_name?: string
   risk_score?: number
   is_suspicious?: boolean
+  persisted?: boolean
 }
 
 const PAGE_SIZE = 25
 const REALTIME_POLL_INTERVAL_MS = 3000
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api'
-const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL ?? 'ws://localhost:8000'
-const ENABLE_TRANSACTIONS_WS = import.meta.env.VITE_ENABLE_TRANSACTIONS_WS === 'true'
-const SHOULD_USE_TRANSACTIONS_WS = !import.meta.env.DEV && ENABLE_TRANSACTIONS_WS
+const WS_BASE_URL = (() => {
+  if (import.meta.env.VITE_WS_BASE_URL) return import.meta.env.VITE_WS_BASE_URL as string
+  try {
+    const apiUrl = new URL(API_BASE_URL)
+    const wsProtocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${wsProtocol}//${apiUrl.host}`
+  } catch {
+    return 'ws://localhost:8000'
+  }
+})()
+const ENABLE_TRANSACTIONS_WS = import.meta.env.VITE_ENABLE_TRANSACTIONS_WS !== 'false'
+const SHOULD_USE_TRANSACTIONS_WS = ENABLE_TRANSACTIONS_WS
 const EXECUTED_BATCHES_STORAGE_KEY = 'aml_transactions_executed_batches'
 const ACTIVE_BATCH_STORAGE_KEY = 'aml_transactions_active_batch'
 
@@ -86,22 +98,23 @@ function fmtDate(v: string): string {
   return d.toLocaleDateString('en-US')
 }
 
+function dateKey(value?: string): string {
+  if (!value) return ''
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toISOString().slice(0, 10)
+}
+
 function sortTransactionsNewestFirst(rows: TransactionRow[]): TransactionRow[] {
   return [...rows].sort((left, right) => {
-    const leftTime = new Date(left.transaction_date).getTime()
-    const rightTime = new Date(right.transaction_date).getTime()
+    const leftTime = new Date(left.transaction_date || left.created_at || 0).getTime()
+    const rightTime = new Date(right.transaction_date || right.created_at || 0).getTime()
     return rightTime - leftTime
   })
 }
 
-function isRealtimeLiveRow(row: TransactionRow): boolean {
-  return !row.transaction_id.startsWith('TXN-IMPORT-')
-}
-
 function buildRealtimeDisplayRows(rows: TransactionRow[]): TransactionRow[] {
-  const preferredRows = rows.filter((row) => isRealtimeLiveRow(row))
-  const sourceRows = preferredRows.length > 0 ? preferredRows : rows
-  return sortTransactionsNewestFirst(sourceRows)
+  return sortTransactionsNewestFirst(rows)
 }
 
 function statusPillClass(status: string): string {
@@ -145,6 +158,8 @@ function mapStreamTransaction(payload: StreamTransactionPayload): TransactionRow
 export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime' }) => {
   const [rows, setRows] = useState<TransactionRow[]>([])
   const [loading, setLoading] = useState(false)
+  const [isExecutingBatch, setIsExecutingBatch] = useState(false)
+  const [isAlertsTableLoading, setIsAlertsTableLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedReviewRow, setSelectedReviewRow] = useState<TransactionRow | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
@@ -153,6 +168,11 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
   const [typeFilter, setTypeFilter] = useState('')
   const [dateFilter, setDateFilter] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
+  const [isClearing, setIsClearing] = useState(false)
+  const [realtimeAutoRefreshEnabled, setRealtimeAutoRefreshEnabled] = useState(true)
+  const [socketStatus, setSocketStatus] = useState<'off' | 'connecting' | 'connected' | 'disconnected' | 'error'>(
+    SHOULD_USE_TRANSACTIONS_WS ? 'disconnected' : 'off',
+  )
 
   const [showSourceModal, setShowSourceModal] = useState(false)
   const [showBulkModal, setShowBulkModal] = useState(false)
@@ -216,20 +236,17 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
     setLoading(true)
     setError(null)
     try {
-      const requests: Promise<Response>[] = [
+      const [txRes, srcRes, custRes] = await Promise.allSettled([
+        fetch(`${API_BASE_URL}/transactions/`),
         fetch(`${API_BASE_URL}/transactions/sources/`),
         fetch(`${API_BASE_URL}/customers/`),
-      ]
+      ])
 
-      requests.unshift(fetch(`${API_BASE_URL}/transactions/`))
+      if (txRes.status !== 'fulfilled' || !txRes.value.ok) {
+        throw new Error('Failed to load transactions data')
+      }
 
-      const responses = await Promise.all(requests)
-      if (responses.some((response) => !response.ok)) throw new Error('Failed to load transactions data')
-
-      const [txRes, srcRes, custRes] = responses
-      const txPayload = (await txRes.json()) as TransactionResponse
-      const srcPayload = (await srcRes.json()) as SourceResponse
-      const custPayload = await custRes.json()
+      const txPayload = (await txRes.value.json()) as TransactionResponse
 
       const nextRows = resultsOf(txPayload)
       const normalizedRows =
@@ -237,12 +254,31 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
           ? buildRealtimeDisplayRows(nextRows)
           : nextRows
 
-      setRows(normalizedRows)
-      setSources(resultsOf(srcPayload))
-      setCustomers(resultsOf(custPayload))
+      if (variant === 'realtime') {
+        setRealtimeAutoRefreshEnabled(true)
+        setRows((prev) => {
+          const persistedIds = new Set(normalizedRows.map((row) => row.transaction_id))
+          const transientRows = prev.filter((row) => !persistedIds.has(row.transaction_id))
+          return sortTransactionsNewestFirst([...normalizedRows, ...transientRows]).slice(0, 1000)
+        })
+      } else {
+        setRows(normalizedRows)
+      }
+
+      if (srcRes.status === 'fulfilled' && srcRes.value.ok) {
+        const srcPayload = (await srcRes.value.json()) as SourceResponse
+        setSources(resultsOf(srcPayload))
+      }
+
+      if (custRes.status === 'fulfilled' && custRes.value.ok) {
+        const custPayload = await custRes.value.json()
+        setCustomers(resultsOf(custPayload))
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load transactions')
-      setRows([])
+      if (variant === 'realtime') {
+        setRealtimeAutoRefreshEnabled(false)
+      }
     } finally {
       setLoading(false)
     }
@@ -253,47 +289,62 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
   }, [variant])
 
   useEffect(() => {
-    if (variant !== 'realtime') return
+    if (variant !== 'realtime' || !realtimeAutoRefreshEnabled) return
     const timer = window.setInterval(() => {
       void loadData()
     }, REALTIME_POLL_INTERVAL_MS)
     return () => window.clearInterval(timer)
-  }, [variant])
+  }, [variant, realtimeAutoRefreshEnabled])
 
   useEffect(() => {
-    if (variant !== 'realtime' || !SHOULD_USE_TRANSACTIONS_WS) return
+    if (variant !== 'realtime' || !SHOULD_USE_TRANSACTIONS_WS || !realtimeAutoRefreshEnabled) return
 
     let socket: WebSocket | null = null
     let isDisposed = false
-    const connectTimer = window.setTimeout(() => {
+    let reconnectTimer: number | null = null
+    let initialConnectTimer: number | null = null
+
+    const connect = () => {
       if (isDisposed) return
-
+      setSocketStatus('connecting')
       socket = new WebSocket(`${WS_BASE_URL.replace(/\/$/, '')}/ws/transactions/`)
-
+      socket.onopen = () => setSocketStatus('connected')
+      socket.onerror = () => setSocketStatus('error')
+      socket.onclose = () => {
+        if (isDisposed) return
+        setSocketStatus('disconnected')
+        reconnectTimer = window.setTimeout(connect, REALTIME_POLL_INTERVAL_MS)
+      }
       socket.onmessage = (event) => {
         try {
-        const payload = JSON.parse(event.data) as StreamTransactionPayload
-        const nextRow = mapStreamTransaction(payload)
-        setRows((prev) => {
-          const hasPreferredRows = prev.some((row) => isRealtimeLiveRow(row))
-          if (hasPreferredRows && !isRealtimeLiveRow(nextRow)) {
-            return prev
-          }
-          return mergeRealtimeRows(prev, nextRow)
-        })
-        setError(null)
-      } catch {
+          const payload = JSON.parse(event.data) as StreamTransactionPayload
+          const nextRow = mapStreamTransaction(payload)
+          setRows((prev) => mergeRealtimeRows(prev, nextRow))
+          setError(null)
+        } catch {
           // Ignore malformed websocket payloads and keep the current table state.
         }
       }
-    }, 0)
+    }
+
+    // Small defer avoids React StrictMode dev double-mount closing a socket mid-handshake.
+    initialConnectTimer = window.setTimeout(connect, 60)
 
     return () => {
       isDisposed = true
-      window.clearTimeout(connectTimer)
+      if (initialConnectTimer) window.clearTimeout(initialConnectTimer)
+      if (reconnectTimer) window.clearTimeout(reconnectTimer)
       if (socket && socket.readyState < WebSocket.CLOSING) {
         socket.close()
       }
+      setSocketStatus(SHOULD_USE_TRANSACTIONS_WS ? 'disconnected' : 'off')
+    }
+  }, [variant, realtimeAutoRefreshEnabled])
+
+  useEffect(() => {
+    if (variant !== 'realtime') return
+    if (!SHOULD_USE_TRANSACTIONS_WS) {
+      setSocketStatus('off')
     }
   }, [variant])
 
@@ -306,18 +357,19 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
       }
       if (statusFilter && r.status !== statusFilter) return false
       if (typeFilter && r.transaction_type !== typeFilter) return false
-      if (dateFilter && new Date(r.transaction_date).toISOString().slice(0, 10) !== dateFilter) return false
+      if (dateFilter && dateKey(r.transaction_date || r.created_at) !== dateFilter) return false
       return true
     })
   }, [rows, activeSearchTerm, statusFilter, typeFilter, dateFilter])
 
+  const disablePagination = true
   const totalRecords = filtered.length
-  const totalPages = Math.max(1, Math.ceil(totalRecords / PAGE_SIZE))
-  const safePage = Math.min(currentPage, totalPages)
-  const startIndex = (safePage - 1) * PAGE_SIZE
-  const pageRows = filtered.slice(startIndex, startIndex + PAGE_SIZE)
-  const displayStart = totalRecords === 0 ? 0 : startIndex + 1
-  const displayEnd = startIndex + pageRows.length
+  const totalPages = disablePagination ? 1 : Math.max(1, Math.ceil(totalRecords / PAGE_SIZE))
+  const safePage = disablePagination ? 1 : Math.min(currentPage, totalPages)
+  const startIndex = disablePagination ? 0 : (safePage - 1) * PAGE_SIZE
+  const pageRows = disablePagination ? filtered : filtered.slice(startIndex, startIndex + PAGE_SIZE)
+  const displayStart = totalRecords === 0 ? 0 : (disablePagination ? 1 : startIndex + 1)
+  const displayEnd = disablePagination ? pageRows.length : startIndex + pageRows.length
   const suspiciousCount = useMemo(() => rows.filter((r) => r.is_suspicious).length, [rows])
   const fileSourcesCount = useMemo(() => sources.filter((s) => s.source_type === 'FILE').length, [sources])
   const completedCount = useMemo(() => rows.filter((r) => r.status === 'COMPLETED').length, [rows])
@@ -427,7 +479,10 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
       const fd = new FormData()
       fd.append('file', bulkFile)
       const res = await fetch(`${API_BASE_URL}/transactions/import_excel/`, { method: 'POST', body: fd })
-      if (!res.ok) throw new Error('Failed Excel import')
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => null)) as { message?: string; error?: string } | null
+        throw new Error(payload?.message || payload?.error || 'Failed file import')
+      }
       setShowBulkModal(false)
       setBulkFile(null)
       await loadData()
@@ -475,12 +530,44 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
     }
   }
 
-  const handleExecuteBatch = () => {
+  const handleClearTransactions = async () => {
+    setIsClearing(true)
+    setError(null)
+    try {
+      const response = await fetch(`${API_BASE_URL}/transactions/clear_all/`, { method: 'DELETE' })
+      if (!response.ok) throw new Error('Failed to clear transactions')
+      setRows([])
+      setCurrentPage(1)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unable to clear transactions')
+    } finally {
+      setIsClearing(false)
+    }
+  }
+
+  const handleExecuteBatch = async () => {
     if (!selectedBatchId) return
-    setExecutedBatchId(selectedBatchId)
-    setActiveExecutedBatchId(selectedBatchId)
-    setExecutedBatchIds((prev) => (prev.includes(selectedBatchId) ? prev : [...prev, selectedBatchId]))
+    const batchIdToExecute = selectedBatchId
+    setIsExecutingBatch(true)
+    setIsAlertsTableLoading(true)
     setShowExecuteModal(false)
+
+    try {
+      await new Promise((resolve) => window.setTimeout(resolve, 1200))
+      setExecutedBatchId(batchIdToExecute)
+      setActiveExecutedBatchId(batchIdToExecute)
+      setExecutedBatchIds((prev) => (prev.includes(batchIdToExecute) ? prev : [...prev, batchIdToExecute]))
+    } finally {
+      setIsExecutingBatch(false)
+      window.setTimeout(() => setIsAlertsTableLoading(false), 250)
+    }
+  }
+
+  const handleExecutedBatchChange = async (batchId: string) => {
+    setIsAlertsTableLoading(true)
+    setActiveExecutedBatchId(batchId)
+    await new Promise((resolve) => window.setTimeout(resolve, 450))
+    setIsAlertsTableLoading(false)
   }
 
   const openExecuteBatchModal = () => {
@@ -504,11 +591,28 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
               <span>Execute Batch</span>
             </button>
           ) : isUploadDataView ? (
-            <button type="button" className="btn-import-action btn-with-icon" onClick={() => setShowBulkModal(true)}>
-              <HiOutlineUpload size={16} aria-hidden />
-              <span>Upload Data</span>
-            </button>
-          ) : null}
+            <>
+              <button type="button" className="btn-import-action btn-with-icon" onClick={() => setShowBulkModal(true)}>
+                <HiOutlineUpload size={16} aria-hidden />
+                <span>Upload Data</span>
+              </button>
+              <button type="button" className="btn-secondary-action btn-with-icon" onClick={() => void handleClearTransactions()} disabled={isClearing}>
+                <HiOutlineTrash size={16} aria-hidden />
+                <span>{isClearing ? 'Clearing...' : 'Clear Transactions'}</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="btn-secondary-action btn-with-icon" onClick={() => void handleClearTransactions()} disabled={isClearing}>
+                <HiOutlineTrash size={16} aria-hidden />
+                <span>{isClearing ? 'Clearing...' : 'Clear Transactions'}</span>
+              </button>
+              <span className={`socket-status-badge socket-status-${socketStatus}`}>
+                <span className="socket-status-dot" aria-hidden="true" />
+                Core banking: {socketStatus}
+              </span>
+            </>
+          )}
         </div>
       </header>
 
@@ -531,8 +635,8 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
                         <div className="bulk-import-icon-circle">
                           <HiOutlineUpload size={20} aria-hidden />
                         </div>
-                        <p className="bulk-import-drop-main">Drop an Excel file here or start a new upload</p>
-                        <p className="bulk-import-drop-sub">Supported formats: `.xlsx` and `.xls`</p>
+                        <p className="bulk-import-drop-main">Drop a CSV or Excel file here or start a new upload</p>
+                        <p className="bulk-import-drop-sub">Supported formats: `.csv`, `.xlsx`, and `.xls`</p>
                         <button type="button" className="btn-primary-action btn-with-icon" onClick={() => setShowBulkModal(true)}>
                           <HiOutlineUpload size={16} aria-hidden />
                           <span>Start Upload</span>
@@ -595,7 +699,7 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
                   <select
                     className="filter-input"
                     value={activeExecutedBatchId}
-                    onChange={(e) => setActiveExecutedBatchId(e.target.value)}
+                    onChange={(e) => void handleExecutedBatchChange(e.target.value)}
                     disabled={executedBatchIds.length === 0}
                   >
                     {executedBatchIds.length === 0 ? (
@@ -622,14 +726,22 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
               </div>
             </div>
 
-            <div className={`customers-table-card-outer ${!displayedBatchId ? 'batch-alerts-empty' : ''}`}>
-              {!displayedBatchId && (
+            <div className={`customers-table-card-outer ${!displayedBatchId && !isAlertsTableLoading ? 'batch-alerts-empty' : ''}`}>
+              {!displayedBatchId && !isAlertsTableLoading && (
                 <div className="batch-alerts-watermark" aria-hidden="true">
                   <HiOutlineShieldExclamation size={42} />
                   <span>No Executed Batch</span>
                 </div>
               )}
-              <div className="report-content-container ecl-table-container">
+              <div className="report-content-container ecl-table-container table-loading-shell">
+                {isAlertsTableLoading && (
+                  <div className="table-loading-overlay" aria-hidden="true">
+                    <div className="table-loading-indicator">
+                      <div className="table-loading-spinner" />
+                      <span className="table-loading-text">Loading alerts...</span>
+                    </div>
+                  </div>
+                )}
                 <table className="ecl-table">
                   <thead>
                     <tr>
@@ -642,7 +754,11 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
                     </tr>
                   </thead>
                   <tbody>
-                    {displayedBatchId && batchAlerts.length === 0 ? (
+                    {isAlertsTableLoading ? (
+                      <tr>
+                        <td colSpan={6} className="muted">Loading alerts for {selectedBatchId || 'selected batch'}...</td>
+                      </tr>
+                    ) : displayedBatchId && batchAlerts.length === 0 ? (
                       <tr>
                         <td colSpan={6} className="muted">No alerts were generated for {displayedBatchId}.</td>
                       </tr>
@@ -661,7 +777,9 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
                       ))
                     )}
                     {Array.from({
-                      length: displayedBatchId
+                      length: isAlertsTableLoading
+                        ? Math.max(0, PAGE_SIZE - 1)
+                        : displayedBatchId
                         ? batchAlerts.length > 0
                           ? Math.max(0, PAGE_SIZE - batchAlerts.length)
                           : Math.max(0, PAGE_SIZE - 1)
@@ -676,10 +794,20 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
               </div>
               <div className="ecl-table-footer">
                 <div className="table-footer-left">
-                  {displayedBatchId ? `Showing alerts for ${displayedBatchId}.` : 'No batch executed yet.'}
+                  {isAlertsTableLoading
+                    ? `Loading alerts for ${selectedBatchId || 'selected batch'}.`
+                    : displayedBatchId
+                      ? `Showing alerts for ${displayedBatchId}.`
+                      : 'No batch executed yet.'}
                 </div>
                 <div className="table-footer-right">
-                  <span>{displayedBatchId ? `${batchAlerts.length} alert(s)` : 'Awaiting batch execution'}</span>
+                  <span>
+                    {isAlertsTableLoading
+                      ? 'Loading alerts...'
+                      : displayedBatchId
+                        ? `${batchAlerts.length} alert(s)`
+                        : 'Awaiting batch execution'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -753,14 +881,22 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
         )}
 
         {variant !== 'upload' && (
-          <div className={`customers-table-card-outer ${!error && pageRows.length === 0 ? 'table-empty-state' : ''}`}>
-            {!error && pageRows.length === 0 && (
+          <div className={`customers-table-card-outer ${!loading && !error && pageRows.length === 0 ? 'table-empty-state' : ''}`}>
+            {!loading && !error && pageRows.length === 0 && (
               <div className="table-empty-watermark" aria-hidden="true">
                 <HiOutlineShieldExclamation size={42} />
                 <span>No Transactions</span>
               </div>
             )}
-            <div className="report-content-container ecl-table-container">
+            <div className="report-content-container ecl-table-container table-loading-shell">
+              {variant === 'realtime' && loading && rows.length === 0 && (
+                <div className="table-loading-overlay" aria-hidden="true">
+                  <div className="table-loading-indicator">
+                    <div className="table-loading-spinner" />
+                    <span className="table-loading-text">Loading real-time transactions...</span>
+                  </div>
+                </div>
+              )}
               <table className="ecl-table">
                   <thead>
                     <tr>
@@ -778,7 +914,7 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
                   <tbody>
                     {error ? (
                       <tr><td colSpan={isBatchView ? 8 : 9} className="muted">{error}</td></tr>
-                    ) : (
+                  ) : (
                       pageRows.map((r) => (
                       <tr key={r.id}>
                         <td className="customer-id">{r.transaction_id}</td>
@@ -816,7 +952,7 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
             <div className="ecl-table-footer">
               <div className="table-footer-left">Showing {displayStart} to {displayEnd} of {totalRecords} results.</div>
               <div className="table-footer-right">
-                {totalPages > 1 ? (
+                {!disablePagination && totalPages > 1 ? (
                   <div className="pagination-controls">
                     <button type="button" className="pagination-btn" disabled={safePage === 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>Previous</button>
                     <span className="pagination-info">Page {safePage} of {totalPages}</span>
@@ -867,8 +1003,8 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
                   <input type="number" min={1} className="modal-input" value={bulkCount} onChange={(e) => setBulkCount(Number(e.target.value || 1))} />
                 </div>
                 <div className="modal-field">
-                  <label className="modal-label">Or upload Excel (.xlsx/.xls)</label>
-                  <input type="file" className="modal-input" accept=".xlsx,.xls" onChange={(e) => setBulkFile(e.target.files?.[0] ?? null)} />
+                  <label className="modal-label">Or upload CSV / Excel (.csv/.xlsx/.xls)</label>
+                  <input type="file" className="modal-input" accept=".csv,.xlsx,.xls" onChange={(e) => setBulkFile(e.target.files?.[0] ?? null)} />
                 </div>
               </div>
               <div className="modal-footer">
@@ -916,7 +1052,7 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
                 <button type="button" className="btn-secondary-action" onClick={() => setShowExecuteModal(false)}>
                   Cancel
                 </button>
-                <button type="button" className="btn-primary-action" onClick={handleExecuteBatch} disabled={!selectedBatchId}>
+                <button type="button" className="btn-primary-action" onClick={() => void handleExecuteBatch()} disabled={!selectedBatchId || isExecutingBatch}>
                   Execute
                 </button>
               </div>

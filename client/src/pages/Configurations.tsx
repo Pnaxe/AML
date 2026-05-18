@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react'
-import { HiOutlinePencil, HiOutlineSearch, HiOutlineTrash, HiOutlineX } from 'react-icons/hi'
+import React, { useEffect, useMemo, useState } from 'react'
+import { HiOutlineKey, HiOutlinePencil, HiOutlineSearch, HiOutlineTrash, HiOutlineX } from 'react-icons/hi'
 import { useToast } from '../contexts/ToastContext'
+import { useAuth } from '../contexts/AuthContext'
 import './Customers.css'
 
 type AmlConfig = {
@@ -11,6 +12,7 @@ type AmlConfig = {
   watchlistApiKey: string
   blacklistApiKey: string
   modelRegistryApiKey: string
+  customApiKeys: ApiKeyRecord[]
   dbHost: string
   dbPort: string
   dbName: string
@@ -32,8 +34,15 @@ type AmlConfig = {
   updatedAt: string
 }
 
-const STORAGE_KEY = 'aml_system_config_v1'
+type ApiKeyRecord = {
+  id: string
+  name: string
+  key: string
+  createdAt: string
+}
+
 const PAGE_SIZE = 25
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api'
 
 const defaultConfig: AmlConfig = {
   environment: 'development',
@@ -43,6 +52,7 @@ const defaultConfig: AmlConfig = {
   watchlistApiKey: '',
   blacklistApiKey: '',
   modelRegistryApiKey: '',
+  customApiKeys: [],
   dbHost: 'localhost',
   dbPort: '5432',
   dbName: 'aml_database',
@@ -68,23 +78,16 @@ type ConfigRow = {
   category: string
   key: string
   value: string
-  field: keyof AmlConfig
+  field?: keyof AmlConfig
+  apiKeyId?: string
+  rawValue?: string
+  isCustomApiKey?: boolean
 }
 
 type ConfigurationsVariant = 'system' | 'email' | 'risk' | 'api'
 
 type ConfigurationsProps = {
   variant?: ConfigurationsVariant
-}
-
-function parseStoredConfig(raw: string | null): AmlConfig {
-  if (!raw) return defaultConfig
-  try {
-    const parsed = JSON.parse(raw) as Partial<AmlConfig>
-    return { ...defaultConfig, ...parsed }
-  } catch {
-    return defaultConfig
-  }
 }
 
 function maskValue(value: string): string {
@@ -102,13 +105,41 @@ function fmtDate(value: string): string {
 
 export const Configurations: React.FC<ConfigurationsProps> = ({ variant = 'system' }) => {
   const { showToast } = useToast()
-  const [config, setConfig] = useState<AmlConfig>(() => parseStoredConfig(localStorage.getItem(STORAGE_KEY)))
+  const { token } = useAuth()
+  const [config, setConfig] = useState<AmlConfig>(defaultConfig)
   const [searchTerm, setSearchTerm] = useState('')
   const [activeSearchTerm, setActiveSearchTerm] = useState('')
   const [selectedRow, setSelectedRow] = useState<ConfigRow | null>(null)
   const [editValue, setEditValue] = useState('')
+  const [editApiKeyName, setEditApiKeyName] = useState('')
   const [editBoolean, setEditBoolean] = useState(false)
+  const [isAddApiKeyOpen, setIsAddApiKeyOpen] = useState(false)
+  const [addApiKeyName, setAddApiKeyName] = useState('')
+  const [addApiKeyValue, setAddApiKeyValue] = useState('')
+  const [deleteApiKeyRow, setDeleteApiKeyRow] = useState<ConfigRow | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    const loadConfig = async () => {
+      setIsLoading(true)
+      try {
+        const headers: Record<string, string> = {}
+        if (token) headers.Authorization = `Token ${token}`
+        const response = await fetch(`${API_BASE_URL}/system-config/`, { headers })
+        if (!response.ok) throw new Error('Failed to load configuration')
+        const payload = (await response.json()) as Partial<AmlConfig>
+        setConfig({ ...defaultConfig, ...payload })
+      } catch (error) {
+        console.error(error)
+        showToast('Unable to load system configuration.')
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    void loadConfig()
+  }, [showToast, token])
 
   const pageTitle =
     variant === 'email'
@@ -137,11 +168,19 @@ export const Configurations: React.FC<ConfigurationsProps> = ({ variant = 'syste
       { category: 'System', key: 'Model Monitoring', value: config.modelMonitoringEnabled ? 'Enabled' : 'Disabled', field: 'modelMonitoringEnabled' },
       { category: 'Risk', key: 'High Threshold', value: config.amlRiskThresholdHigh || '-', field: 'amlRiskThresholdHigh' },
       { category: 'Risk', key: 'Medium Threshold', value: config.amlRiskThresholdMedium || '-', field: 'amlRiskThresholdMedium' },
-      { category: 'API Keys', key: 'Transaction Feed API Key', value: secret(config.transactionFeedApiKey), field: 'transactionFeedApiKey' },
-      { category: 'API Keys', key: 'Screening API Key', value: secret(config.screeningApiKey), field: 'screeningApiKey' },
-      { category: 'API Keys', key: 'Watchlist DB API Key', value: secret(config.watchlistApiKey), field: 'watchlistApiKey' },
-      { category: 'API Keys', key: 'Blacklist API Key', value: secret(config.blacklistApiKey), field: 'blacklistApiKey' },
-      { category: 'API Keys', key: 'Model Registry API Key', value: secret(config.modelRegistryApiKey), field: 'modelRegistryApiKey' },
+      { category: 'API Keys', key: 'Transaction Feed API Key', value: secret(config.transactionFeedApiKey), rawValue: config.transactionFeedApiKey, field: 'transactionFeedApiKey' },
+      { category: 'API Keys', key: 'Screening API Key', value: secret(config.screeningApiKey), rawValue: config.screeningApiKey, field: 'screeningApiKey' },
+      { category: 'API Keys', key: 'Watchlist DB API Key', value: secret(config.watchlistApiKey), rawValue: config.watchlistApiKey, field: 'watchlistApiKey' },
+      { category: 'API Keys', key: 'Blacklist API Key', value: secret(config.blacklistApiKey), rawValue: config.blacklistApiKey, field: 'blacklistApiKey' },
+      { category: 'API Keys', key: 'Model Registry API Key', value: secret(config.modelRegistryApiKey), rawValue: config.modelRegistryApiKey, field: 'modelRegistryApiKey' },
+      ...config.customApiKeys.map((apiKey) => ({
+        category: 'API Keys',
+        key: apiKey.name,
+        value: secret(apiKey.key),
+        rawValue: apiKey.key,
+        apiKeyId: apiKey.id,
+        isCustomApiKey: true,
+      })),
       { category: 'Database', key: 'DB Host', value: config.dbHost || '-', field: 'dbHost' },
       { category: 'Database', key: 'DB Port', value: config.dbPort || '-', field: 'dbPort' },
       { category: 'Database', key: 'DB Name', value: config.dbName || '-', field: 'dbName' },
@@ -166,8 +205,12 @@ export const Configurations: React.FC<ConfigurationsProps> = ({ variant = 'syste
   }, [variant])
 
   const scopedRows = useMemo(
-    () => rows.filter((row) => visibleCategories.includes(row.category)),
-    [rows, visibleCategories],
+    () => rows.filter((row) => {
+      if (!visibleCategories.includes(row.category)) return false
+      if (variant !== 'api' || row.category !== 'API Keys') return true
+      return row.isCustomApiKey || !!row.rawValue?.trim()
+    }),
+    [rows, variant, visibleCategories],
   )
 
   const filteredRows = useMemo(() => {
@@ -188,20 +231,63 @@ export const Configurations: React.FC<ConfigurationsProps> = ({ variant = 'syste
 
   const booleanFields: Array<keyof AmlConfig> = ['dbSslEnabled', 'autoScreeningEnabled', 'autoSarEnabled', 'modelMonitoringEnabled']
   const secretFields: Array<keyof AmlConfig> = ['transactionFeedApiKey', 'screeningApiKey', 'watchlistApiKey', 'blacklistApiKey', 'modelRegistryApiKey', 'dbPassword', 'smtpPassword']
-  const isBooleanField = (field: keyof AmlConfig) => booleanFields.includes(field)
-  const isSecretField = (field: keyof AmlConfig) => secretFields.includes(field)
+  const isBooleanField = (field?: keyof AmlConfig) => !!field && booleanFields.includes(field)
+  const isSecretField = (field?: keyof AmlConfig) => !!field && secretFields.includes(field)
+
+  const openAddApiKeyModal = () => {
+    setAddApiKeyName('')
+    setAddApiKeyValue('')
+    setIsAddApiKeyOpen(true)
+  }
 
   const openEditModal = (row: ConfigRow) => {
     setSelectedRow(row)
-    if (isBooleanField(row.field)) {
-      setEditBoolean(Boolean(config[row.field] as boolean))
-    } else {
+    if (row.isCustomApiKey) {
+      setEditApiKeyName(row.key)
+      setEditValue(row.rawValue ?? '')
+    } else if (isBooleanField(row.field)) {
+      setEditBoolean(Boolean(config[row.field as keyof AmlConfig] as boolean))
+    } else if (row.field) {
       setEditValue(String(config[row.field] ?? ''))
     }
   }
 
-  const saveRowValue = () => {
+  const saveRowValue = async () => {
     if (!selectedRow) return
+    if (selectedRow.isCustomApiKey) {
+      const nextConfig = {
+        ...config,
+        customApiKeys: config.customApiKeys.map((apiKey) =>
+          apiKey.id === selectedRow.apiKeyId
+            ? { ...apiKey, name: editApiKeyName.trim(), key: editValue.trim() }
+            : apiKey,
+        ),
+        updatedAt: new Date().toISOString(),
+      } as AmlConfig
+
+      try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+        if (token) headers.Authorization = `Token ${token}`
+        const response = await fetch(`${API_BASE_URL}/system-config/`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify(nextConfig),
+        })
+        if (!response.ok) throw new Error('Failed to save API key')
+        const saved = (await response.json()) as Partial<AmlConfig>
+        setConfig({ ...defaultConfig, ...saved })
+        setSelectedRow(null)
+        setEditApiKeyName('')
+        setEditValue('')
+        showToast(`${editApiKeyName.trim()} updated.`)
+      } catch (error) {
+        console.error(error)
+        showToast(`Unable to update ${selectedRow.key}.`)
+      }
+      return
+    }
+
+    if (!selectedRow.field) return
     const field = selectedRow.field
     const nextValue = isBooleanField(field)
       ? editBoolean
@@ -215,24 +301,95 @@ export const Configurations: React.FC<ConfigurationsProps> = ({ variant = 'syste
       updatedAt: new Date().toISOString(),
     } as AmlConfig
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextConfig))
-    setConfig(nextConfig)
-    setSelectedRow(null)
-    setEditValue('')
-    showToast(`${selectedRow.key} updated.`)
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (token) headers.Authorization = `Token ${token}`
+      const response = await fetch(`${API_BASE_URL}/system-config/`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify(nextConfig),
+      })
+      if (!response.ok) throw new Error('Failed to save configuration')
+      const saved = (await response.json()) as Partial<AmlConfig>
+      setConfig({ ...defaultConfig, ...saved })
+      setSelectedRow(null)
+      setEditValue('')
+      showToast(`${selectedRow.key} updated.`)
+    } catch (error) {
+      console.error(error)
+      showToast(`Unable to update ${selectedRow.key}.`)
+    }
   }
 
-  const clearApiKey = (row: ConfigRow) => {
-    if (row.category !== 'API Keys') return
+  const saveNewApiKey = async () => {
+    if (!addApiKeyName.trim() || !addApiKeyValue.trim()) return
+    const now = new Date().toISOString()
     const nextConfig = {
       ...config,
-      [row.field]: '',
+      customApiKeys: [
+        ...config.customApiKeys,
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          name: addApiKeyName.trim(),
+          key: addApiKeyValue.trim(),
+          createdAt: now,
+        },
+      ],
+      updatedAt: now,
+    } as AmlConfig
+
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (token) headers.Authorization = `Token ${token}`
+      const response = await fetch(`${API_BASE_URL}/system-config/`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify(nextConfig),
+      })
+      if (!response.ok) throw new Error('Failed to add API key')
+      const saved = (await response.json()) as Partial<AmlConfig>
+      setConfig({ ...defaultConfig, ...saved })
+      setIsAddApiKeyOpen(false)
+      setAddApiKeyName('')
+      setAddApiKeyValue('')
+      showToast(`${addApiKeyName.trim()} added.`)
+    } catch (error) {
+      console.error(error)
+      showToast(`Unable to add ${addApiKeyName.trim() || 'API key'}.`)
+    }
+  }
+
+  const confirmDeleteApiKey = async () => {
+    const row = deleteApiKeyRow
+    if (!row) return
+    if (row.category !== 'API Keys') return
+    const customApiKeys = row.isCustomApiKey
+      ? config.customApiKeys.filter((apiKey) => apiKey.id !== row.apiKeyId)
+      : config.customApiKeys
+    const nextConfig = {
+      ...config,
+      ...(row.field ? { [row.field]: '' } : {}),
+      customApiKeys,
       updatedAt: new Date().toISOString(),
     } as AmlConfig
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextConfig))
-    setConfig(nextConfig)
-    showToast(`${row.key} deleted.`)
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (token) headers.Authorization = `Token ${token}`
+      const response = await fetch(`${API_BASE_URL}/system-config/`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify(nextConfig),
+      })
+      if (!response.ok) throw new Error('Failed to clear API key')
+      const saved = (await response.json()) as Partial<AmlConfig>
+      setConfig({ ...defaultConfig, ...saved })
+      setDeleteApiKeyRow(null)
+      showToast(`${row.key} deleted.`)
+    } catch (error) {
+      console.error(error)
+      showToast(`Unable to delete ${row.key}.`)
+    }
   }
 
   return (
@@ -242,6 +399,14 @@ export const Configurations: React.FC<ConfigurationsProps> = ({ variant = 'syste
           <h1 className="customers-title">{pageTitle}</h1>
           <p className="customers-subtitle">{pageSubtitle}</p>
         </div>
+        {variant === 'api' && (
+          <div className="customers-header-actions">
+            <button type="button" className="btn-primary-action btn-with-icon" onClick={openAddApiKeyModal}>
+              <HiOutlineKey size={16} aria-hidden="true" />
+              <span>Add API Key</span>
+            </button>
+          </div>
+        )}
       </header>
 
       <div className="customers-container">
@@ -271,8 +436,8 @@ export const Configurations: React.FC<ConfigurationsProps> = ({ variant = 'syste
           </div>
         </div>
 
-        <div className={`customers-table-card-outer config-summary-card ${pageRows.length === 0 ? 'table-empty-state' : ''}`}>
-          {pageRows.length === 0 && (
+          <div className={`customers-table-card-outer config-summary-card ${!isLoading && pageRows.length === 0 ? 'table-empty-state' : ''}`}>
+          {!isLoading && pageRows.length === 0 && (
             <div className="table-empty-watermark" aria-hidden="true">
               <HiOutlinePencil size={42} />
               <span>No Configuration Items</span>
@@ -289,7 +454,11 @@ export const Configurations: React.FC<ConfigurationsProps> = ({ variant = 'syste
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((row, idx) => (
+                {isLoading ? (
+                  Array.from({ length: PAGE_SIZE }).map((_, idx) => (
+                    <tr key={`loading-${idx}`}>{Array.from({ length: 4 }).map((__, c) => <td key={c}>Loading...</td>)}</tr>
+                  ))
+                ) : pageRows.map((row, idx) => (
                   <tr key={`${row.category}-${row.key}-${idx}`}>
                     <td>{row.category}</td>
                     <td className="customer-id">{row.key}</td>
@@ -306,7 +475,7 @@ export const Configurations: React.FC<ConfigurationsProps> = ({ variant = 'syste
                           <HiOutlineTrash
                             size={18}
                             className="action-icon action-icon-delete"
-                            onClick={() => clearApiKey(row)}
+                            onClick={() => setDeleteApiKeyRow(row)}
                             title="Delete API key"
                           />
                         )}
@@ -314,7 +483,7 @@ export const Configurations: React.FC<ConfigurationsProps> = ({ variant = 'syste
                     </td>
                   </tr>
                 ))}
-                {Array.from({ length: Math.max(0, PAGE_SIZE - pageRows.length) }).map((_, idx) => (
+                {!isLoading && Array.from({ length: Math.max(0, PAGE_SIZE - pageRows.length) }).map((_, idx) => (
                   <tr key={`empty-${idx}`}>{Array.from({ length: 4 }).map((__, c) => <td key={c}>&nbsp;</td>)}</tr>
                 ))}
               </tbody>
@@ -338,11 +507,11 @@ export const Configurations: React.FC<ConfigurationsProps> = ({ variant = 'syste
       </div>
 
       {selectedRow && (
-        <div className="modal-backdrop" onClick={() => { setSelectedRow(null); setEditValue('') }}>
+        <div className="modal-backdrop" onClick={() => { setSelectedRow(null); setEditValue(''); setEditApiKeyName('') }}>
           <div className="modal-panel modal-panel-sm" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 className="modal-title">Edit Configuration</h2>
-              <button type="button" className="modal-close-btn" onClick={() => { setSelectedRow(null); setEditValue('') }} aria-label="Close">
+              <h2 className="modal-title">{selectedRow.isCustomApiKey ? 'Edit API Key' : 'Edit Configuration'}</h2>
+              <button type="button" className="modal-close-btn" onClick={() => { setSelectedRow(null); setEditValue(''); setEditApiKeyName('') }} aria-label="Close">
                 <HiOutlineX size={18} />
               </button>
             </div>
@@ -351,7 +520,9 @@ export const Configurations: React.FC<ConfigurationsProps> = ({ variant = 'syste
                 <div className="config-section-header">
                   <h2 className="config-section-title">{selectedRow.key}</h2>
                   <p className="config-section-description">
-                    Update the selected {selectedRow.category.toLowerCase()} setting and save the new value.
+                    {selectedRow.isCustomApiKey
+                      ? 'Update the display name and secret value for this API key.'
+                      : `Update the selected ${selectedRow.category.toLowerCase()} setting and save the new value.`}
                   </p>
                 </div>
                 <div className="modal-two-column">
@@ -364,6 +535,17 @@ export const Configurations: React.FC<ConfigurationsProps> = ({ variant = 'syste
                     <input className="modal-input" value={fmtDate(config.updatedAt)} readOnly />
                   </div>
                 </div>
+                {selectedRow.isCustomApiKey && (
+                  <div className="modal-field">
+                    <label className="modal-label">API Key Name</label>
+                    <input
+                      className="modal-input"
+                      value={editApiKeyName}
+                      onChange={(e) => setEditApiKeyName(e.target.value)}
+                      placeholder="Enter API key name"
+                    />
+                  </div>
+                )}
                 <div className="modal-field">
                   <label className="modal-label">Value</label>
                   {selectedRow.field === 'environment' ? (
@@ -389,14 +571,95 @@ export const Configurations: React.FC<ConfigurationsProps> = ({ variant = 'syste
                 </div>
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn-secondary-action" onClick={() => { setSelectedRow(null); setEditValue('') }}>Cancel</button>
+                <button type="button" className="btn-secondary-action" onClick={() => { setSelectedRow(null); setEditValue(''); setEditApiKeyName('') }}>Cancel</button>
                 <button
                   type="button"
                   className="btn-primary-action"
                   onClick={saveRowValue}
+                  disabled={selectedRow.isCustomApiKey && (!editApiKeyName.trim() || !editValue.trim())}
                 >
                   Save
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isAddApiKeyOpen && (
+        <div className="modal-backdrop" onClick={() => { setIsAddApiKeyOpen(false); setAddApiKeyName(''); setAddApiKeyValue('') }}>
+          <div className="modal-panel modal-panel-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Add API Key</h2>
+              <button type="button" className="modal-close-btn" onClick={() => { setIsAddApiKeyOpen(false); setAddApiKeyName(''); setAddApiKeyValue('') }} aria-label="Close">
+                <HiOutlineX size={18} />
+              </button>
+            </div>
+            <div className="modal-form">
+              <div className="modal-body">
+                <div className="config-section-header">
+                  <h2 className="config-section-title">Integration Credential</h2>
+                  <p className="config-section-description">
+                    Give this credential a clear name and store the secret key used by the external service.
+                  </p>
+                </div>
+                <div className="modal-field">
+                  <label className="modal-label">API Key Name</label>
+                  <input
+                    className="modal-input"
+                    value={addApiKeyName}
+                    onChange={(e) => setAddApiKeyName(e.target.value)}
+                    placeholder="Example: Vendor Screening Key"
+                  />
+                </div>
+                <div className="modal-field">
+                  <label className="modal-label">API Key</label>
+                  <input
+                    type="password"
+                    className="modal-input"
+                    value={addApiKeyValue}
+                    onChange={(e) => setAddApiKeyValue(e.target.value)}
+                    placeholder="Enter API key"
+                  />
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn-secondary-action" onClick={() => { setIsAddApiKeyOpen(false); setAddApiKeyName(''); setAddApiKeyValue('') }}>Cancel</button>
+                <button
+                  type="button"
+                  className="btn-primary-action"
+                  onClick={saveNewApiKey}
+                  disabled={!addApiKeyName.trim() || !addApiKeyValue.trim()}
+                >
+                  Save API Key
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteApiKeyRow && (
+        <div className="modal-backdrop" onClick={() => setDeleteApiKeyRow(null)}>
+          <div className="modal-panel modal-panel-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Delete API Key</h2>
+              <button type="button" className="modal-close-btn" onClick={() => setDeleteApiKeyRow(null)} aria-label="Close">
+                <HiOutlineX size={18} />
+              </button>
+            </div>
+            <div className="modal-form">
+              <div className="modal-body">
+                <div className="config-section-header">
+                  <h2 className="config-section-title">{deleteApiKeyRow.key}</h2>
+                  <p className="config-section-description">
+                    This will remove the stored secret for this API key. Any integration using it may stop working until a new key is added.
+                  </p>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn-secondary-action" onClick={() => setDeleteApiKeyRow(null)}>Cancel</button>
+                <button type="button" className="btn-danger-action" onClick={confirmDeleteApiKey}>Delete API Key</button>
               </div>
             </div>
           </div>

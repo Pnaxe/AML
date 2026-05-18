@@ -2,14 +2,18 @@ from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from django.http import HttpResponse
 from django.shortcuts import render
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q
 from django.db.utils import OperationalError, ProgrammingError
 from django.core.management import call_command
-from io import StringIO
+from io import BytesIO, StringIO
+from io import TextIOWrapper
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+import csv
+import re
 import pandas as pd
 import logging
 from accounts.models import Customer
@@ -27,6 +31,33 @@ from ml_engine.monitoring import TransactionMonitor
 logger = logging.getLogger(__name__)
 
 
+def normalize_import_column_name(value):
+    return re.sub(r'[^a-z0-9]+', '', str(value).strip().lower())
+
+
+IMPORT_COLUMN_ALIASES = {
+    'transaction_id': ['transactionid', 'txnid', 'txid', 'id'],
+    'reference_number': ['referencenumber', 'reference', 'refnumber', 'refno', 'ref'],
+    'transaction_type': ['transactiontype', 'txntype', 'trxtype', 'type'],
+    'amount': ['amount', 'transactionamount', 'txnamount', 'value'],
+    'currency': ['currency', 'transactioncurrency', 'txncurrency', 'ccy'],
+    'sender_customer_id': ['sendercustomerid', 'senderid', 'customercode', 'customerid', 'fromcustomerid', 'debitcustomerid'],
+    'receiver_customer_id': ['receivercustomerid', 'receiverid', 'beneficiarycustomerid', 'tocustomerid', 'creditcustomerid'],
+    'originating_country': ['originatingcountry', 'sourcecountry', 'fromcountry'],
+    'destination_country': ['destinationcountry', 'targetcountry', 'tocountry'],
+    'sender_account': ['senderaccount', 'fromaccount', 'debitaccount'],
+    'receiver_account': ['receiveraccount', 'toaccount', 'beneficiaryaccount', 'creditaccount'],
+    'sender_bank': ['senderbank', 'frombank', 'originatingbank'],
+    'receiver_bank': ['receiverbank', 'tobank', 'beneficiarybank', 'destinationbank'],
+    'description': ['description', 'narrative', 'remarks', 'memo', 'details'],
+    'status': ['status', 'transactionstatus', 'txnstatus'],
+    'transaction_date': ['transactiondate', 'date', 'datetime', 'postingdate', 'valuedate', 'timestamp', 'transactiondatetime'],
+    'ip_address': ['ipaddress', 'ip'],
+    'device_id': ['deviceid', 'device'],
+    'channel': ['channel', 'sourcechannel'],
+}
+
+
 class TransactionViewSet(viewsets.ModelViewSet):
     """
     ViewSet for Transaction CRUD and monitoring
@@ -40,8 +71,8 @@ class TransactionViewSet(viewsets.ModelViewSet):
         'sender', 'receiver', 'currency'
     ]
     search_fields = ['transaction_id', 'reference_number', 'description']
-    ordering_fields = ['transaction_date', 'amount', 'risk_score']
-    ordering = ['-transaction_date']
+    ordering_fields = ['created_at', 'updated_at', 'transaction_date', 'amount', 'risk_score']
+    ordering = ['-created_at']
     
     def get_serializer_class(self):
         if self.action == 'create':
@@ -193,7 +224,7 @@ class TransactionViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def import_excel(self, request):
         """
-        Import transactions from Excel file
+        Import transactions from CSV or Excel file
         Expected columns:
         - transaction_id (required, unique)
         - reference_number (optional)
@@ -216,54 +247,108 @@ class TransactionViewSet(viewsets.ModelViewSet):
         - channel (optional)
         """
         if 'file' not in request.FILES:
+            logger.warning('Transaction import rejected: no file provided')
             return Response({
                 'error': 'No file provided',
-                'message': 'Please upload an Excel file'
+                'message': 'Please upload a CSV or Excel file'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         file = request.FILES['file']
+        file_name = file.name.lower()
         
         # Validate file extension
-        if not file.name.endswith(('.xlsx', '.xls')):
+        if not file_name.endswith(('.csv', '.xlsx', '.xls')):
+            logger.warning('Transaction import rejected: invalid file type "%s"', file.name)
             return Response({
                 'error': 'Invalid file type',
-                'message': 'Please upload an Excel file (.xlsx or .xls)'
+                'message': 'Please upload a CSV or Excel file (.csv, .xlsx, or .xls)'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            # Read Excel file
-            df = pd.read_excel(file)
+            # Read uploaded file based on extension.
+            if file_name.endswith('.csv'):
+                signature = file.read(4)
+                file.seek(0)
+
+                if signature.startswith(b'PK'):
+                    logger.warning('Transaction import rejected: Excel workbook uploaded with .csv extension ("%s")', file.name)
+                    return Response({
+                        'error': 'Invalid file type',
+                        'message': 'This file looks like an Excel workbook saved with a .csv extension. Please upload it as .xlsx/.xls or export a real CSV file.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                try:
+                    text_file = TextIOWrapper(file.file, encoding='utf-8-sig', newline='')
+                    df = pd.read_csv(text_file, sep=None, engine='python')
+                except csv.Error:
+                    file.seek(0)
+                    text_file = TextIOWrapper(file.file, encoding='utf-8-sig', newline='')
+                    df = pd.read_csv(text_file)
+                finally:
+                    try:
+                        text_file.detach()
+                    except Exception:
+                        pass
+                    file.seek(0)
+            else:
+                df = pd.read_excel(file)
             
             # Strip whitespace from column names
             df.columns = df.columns.str.strip()
+            df = df.dropna(how='all')
+
+            if df.empty:
+                logger.warning('Transaction import rejected: uploaded file "%s" has no data rows', file.name)
+                return Response({
+                    'error': 'Empty file',
+                    'message': 'The uploaded file has no data rows after removing blank lines.'
+                }, status=status.HTTP_400_BAD_REQUEST)
             
             # Required columns
             required_columns = ['transaction_id', 'transaction_type', 'amount', 'sender_customer_id', 'transaction_date']
-            
-            # Check for required columns (case-insensitive)
-            actual_columns_lower = {col.lower(): col for col in df.columns}
+
+            normalized_columns = {
+                normalize_import_column_name(col): col
+                for col in df.columns
+            }
+            resolved_column_map = {}
             missing_columns = []
-            
+
             for req_col in required_columns:
-                if req_col.lower() not in actual_columns_lower:
+                alias_keys = [normalize_import_column_name(req_col), *IMPORT_COLUMN_ALIASES.get(req_col, [])]
+                matched_column = next((normalized_columns[key] for key in alias_keys if key in normalized_columns), None)
+                if matched_column is None:
                     missing_columns.append(req_col)
+                else:
+                    resolved_column_map[req_col] = matched_column
             
             if missing_columns:
+                logger.warning(
+                    'Transaction import rejected: missing required columns in "%s". Missing=%s Found=%s',
+                    file.name,
+                    missing_columns,
+                    list(df.columns),
+                )
                 return Response({
                     'error': 'Missing required columns',
-                    'message': f'Excel file must contain the following columns: {", ".join(required_columns)}',
+                    'message': f'Uploaded file must contain the following columns: {", ".join(required_columns)}',
                     'missing_columns': missing_columns,
                     'found_columns': list(df.columns)
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # Create a mapping for case-insensitive column access
-            column_map = {col.lower(): col for col in df.columns}
-            
-            # Helper function to get column value (case-insensitive)
+            for canonical_name, aliases in IMPORT_COLUMN_ALIASES.items():
+                if canonical_name in resolved_column_map:
+                    continue
+                alias_keys = [normalize_import_column_name(canonical_name), *aliases]
+                matched_column = next((normalized_columns[key] for key in alias_keys if key in normalized_columns), None)
+                if matched_column is not None:
+                    resolved_column_map[canonical_name] = matched_column
+
+            # Helper function to get column value with alias support.
             def get_col(row, col_name):
-                col_key = col_name.lower()
-                if col_key in column_map:
-                    return row.get(column_map[col_key])
+                resolved_column = resolved_column_map.get(col_name)
+                if resolved_column is not None:
+                    return row.get(resolved_column)
                 return None
             
             # Validation results
@@ -272,8 +357,14 @@ class TransactionViewSet(viewsets.ModelViewSet):
             imported_count = 0
             skipped_count = 0
             
-            # Get all customer IDs for validation
-            customer_ids = set(Customer.objects.filter(is_active=True).values_list('id', flat=True))
+            # Get all active customers for validation by database id or customer_id code.
+            active_customers = Customer.objects.filter(is_active=True)
+            customers_by_db_id = {customer.id: customer for customer in active_customers}
+            customers_by_customer_id = {
+                customer.customer_id.strip().upper(): customer
+                for customer in active_customers
+                if customer.customer_id
+            }
             
             # Transaction type choices
             valid_transaction_types = [choice[0] for choice in Transaction.TRANSACTION_TYPE_CHOICES]
@@ -281,6 +372,45 @@ class TransactionViewSet(viewsets.ModelViewSet):
             
             # Check for duplicate transaction_ids in the file
             existing_transaction_ids = set(Transaction.objects.values_list('transaction_id', flat=True))
+
+            def resolve_customer_reference(raw_value):
+                if raw_value is None or pd.isna(raw_value):
+                    return None
+
+                raw_text = str(raw_value).strip()
+                if not raw_text:
+                    return None
+
+                if raw_text.upper() in customers_by_customer_id:
+                    return customers_by_customer_id[raw_text.upper()]
+
+                try:
+                    numeric_id = int(float(raw_text))
+                except (ValueError, TypeError):
+                    return None
+
+                return customers_by_db_id.get(numeric_id)
+
+            def ensure_customer_for_import(raw_value):
+                customer = resolve_customer_reference(raw_value)
+                if customer is not None:
+                    return customer
+
+                raw_text = str(raw_value).strip() if raw_value is not None else ''
+                if not raw_text:
+                    return None
+
+                placeholder_customer = Customer.objects.create(
+                    customer_id=raw_text,
+                    customer_type='CORPORATE',
+                    company_name=f'Imported Customer {raw_text}',
+                    risk_level='LOW',
+                    is_active=True,
+                )
+                customers_by_db_id[placeholder_customer.id] = placeholder_customer
+                customers_by_customer_id[raw_text.upper()] = placeholder_customer
+                logger.info('Created placeholder customer for transaction import: %s', raw_text)
+                return placeholder_customer
             
             for index, row in df.iterrows():
                 row_num = index + 2  # Excel row numbers start at 1, plus header row
@@ -313,25 +443,27 @@ class TransactionViewSet(viewsets.ModelViewSet):
                     amount = None
                 
                 # Validate sender_customer_id
-                try:
-                    sender_id_val = get_col(row, 'sender_customer_id')
-                    sender_id = int(sender_id_val if sender_id_val is not None else 0)
-                    if sender_id not in customer_ids:
-                        row_errors.append(f'Row {row_num}: sender_customer_id "{sender_id}" does not exist')
-                except (ValueError, TypeError):
-                    row_errors.append(f'Row {row_num}: Invalid sender_customer_id format')
-                    sender_id = None
+                sender_id_val = get_col(row, 'sender_customer_id')
+                sender_customer = ensure_customer_for_import(sender_id_val)
+                sender_id = sender_customer.id if sender_customer else None
+                if sender_id is None:
+                    sender_display = str(sender_id_val if sender_id_val is not None else '').strip() or 'blank'
+                    row_errors.append(
+                        f'Row {row_num}: sender_customer_id "{sender_display}" was not found. Use an active numeric ID or customer code like CUST-IND-0001.'
+                    )
                 
                 # Validate receiver_customer_id (optional)
                 receiver_id = None
                 receiver_id_val = get_col(row, 'receiver_customer_id')
                 if receiver_id_val is not None and pd.notna(receiver_id_val):
-                    try:
-                        receiver_id = int(receiver_id_val)
-                        if receiver_id not in customer_ids:
-                            row_errors.append(f'Row {row_num}: receiver_customer_id "{receiver_id}" does not exist')
-                    except (ValueError, TypeError):
-                        row_errors.append(f'Row {row_num}: Invalid receiver_customer_id format')
+                    receiver_customer = ensure_customer_for_import(receiver_id_val)
+                    if receiver_customer is None:
+                        receiver_display = str(receiver_id_val).strip() or 'blank'
+                        row_errors.append(
+                            f'Row {row_num}: receiver_customer_id "{receiver_display}" was not found. Use an active numeric ID or customer code like CUST-CORP-0001.'
+                        )
+                    else:
+                        receiver_id = receiver_customer.id
                 
                 # Validate transaction_date
                 transaction_date = None
@@ -395,8 +527,15 @@ class TransactionViewSet(viewsets.ModelViewSet):
                         'channel': safe_get('channel'),
                     })
             
-            # If there are validation errors, return them
-            if validation_errors:
+            # If every row is invalid, stop and return the validation errors.
+            if validation_errors and not valid_rows:
+                logger.warning(
+                    'Transaction import validation failed for "%s": total_errors=%s skipped_rows=%s sample_errors=%s',
+                    file.name,
+                    len(validation_errors),
+                    skipped_count,
+                    validation_errors[:5],
+                )
                 return Response({
                     'error': 'Validation failed',
                     'message': f'Found {len(validation_errors)} validation error(s). {skipped_count} row(s) will be skipped.',
@@ -410,10 +549,10 @@ class TransactionViewSet(viewsets.ModelViewSet):
             monitor = TransactionMonitor()
             for row_data in valid_rows:
                 try:
-                    sender = Customer.objects.get(id=row_data['sender_id'], is_active=True)
+                    sender = customers_by_db_id[row_data['sender_id']]
                     receiver = None
                     if row_data['receiver_id']:
-                        receiver = Customer.objects.get(id=row_data['receiver_id'], is_active=True)
+                        receiver = customers_by_db_id[row_data['receiver_id']]
                     
                     transaction = Transaction.objects.create(
                         transaction_id=row_data['transaction_id'],
@@ -448,10 +587,18 @@ class TransactionViewSet(viewsets.ModelViewSet):
                     skipped_count += 1
             
             if validation_errors:
+                logger.warning(
+                    'Transaction import completed with partial errors for "%s": imported=%s skipped=%s sample_errors=%s',
+                    file.name,
+                    imported_count,
+                    skipped_count,
+                    validation_errors[:5],
+                )
                 return Response({
                     'error': 'Import completed with errors',
                     'message': f'Imported {imported_count} transaction(s), {skipped_count} skipped',
-                    'validation_errors': validation_errors,
+                    'validation_errors': validation_errors[:50],
+                    'total_errors': len(validation_errors),
                     'imported_count': imported_count,
                     'skipped_count': skipped_count
                 }, status=status.HTTP_207_MULTI_STATUS)
@@ -463,15 +610,62 @@ class TransactionViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_201_CREATED)
             
         except pd.errors.EmptyDataError:
+            logger.warning('Transaction import rejected: empty file "%s"', file.name)
             return Response({
                 'error': 'Empty file',
-                'message': 'The Excel file is empty'
+                'message': 'The uploaded file is empty'
             }, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
+            logger.exception('Transaction import failed for "%s"', file.name)
             return Response({
                 'error': 'Import failed',
                 'message': f'Failed to import transactions: {str(e)}'
             }, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['get'])
+    def download_excel_template(self, request):
+        customers = list(Customer.objects.filter(is_active=True).order_by('-created_at')[:2])
+        if not customers:
+            return Response({
+                'error': 'No active customers found',
+                'message': 'Create at least one active customer before downloading the Excel template.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        sender_customer_id = customers[0].customer_id
+        receiver_customer_id = customers[1].customer_id if len(customers) > 1 else sender_customer_id
+
+        template_rows = [{
+            'transaction_id': f'TX-{datetime.now().strftime("%Y%m%d%H%M%S")}',
+            'reference_number': 'REF-100001',
+            'transaction_type': 'TRANSFER',
+            'amount': '1500.00',
+            'currency': 'USD',
+            'sender_customer_id': sender_customer_id,
+            'receiver_customer_id': receiver_customer_id,
+            'originating_country': '',
+            'destination_country': '',
+            'sender_account': '',
+            'receiver_account': '',
+            'sender_bank': '',
+            'receiver_bank': '',
+            'description': 'Sample transaction import row',
+            'status': 'PENDING',
+            'transaction_date': datetime.now().isoformat(),
+            'ip_address': '',
+            'device_id': '',
+            'channel': '',
+        }]
+
+        output = BytesIO()
+        pd.DataFrame(template_rows).to_excel(output, index=False, sheet_name='Transactions')
+        output.seek(0)
+
+        response = HttpResponse(
+            output.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = 'attachment; filename="transactions_upload_template.xlsx"'
+        return response
 
     @action(detail=False, methods=['get', 'post'])
     def sources(self, request):

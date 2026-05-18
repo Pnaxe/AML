@@ -14,8 +14,11 @@ import importlib.util
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / '.env', override=True)
 
 
 # Quick-start development settings - unsuitable for production
@@ -24,10 +27,25 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-)&$hykgahw^72^9gbyhjz)*6k10@s-j)x0hybc0#c__%u4dnl^'
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+def env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
 
-ALLOWED_HOSTS = []
+    normalized = raw.strip().lower()
+    if normalized in ('1', 'true', 'yes', 'on', 'debug', 'dev', 'development'):
+        return True
+    if normalized in ('0', 'false', 'no', 'off', 'release', 'prod', 'production'):
+        return False
+    return default
+
+
+# SECURITY WARNING: don't run with debug turned on in production!
+DEBUG = env_flag('DEBUG', True)
+
+default_allowed_hosts = ['localhost', '127.0.0.1', '[::1]']
+allowed_hosts_env = os.getenv('ALLOWED_HOSTS', '')
+ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_env.split(',') if host.strip()] or default_allowed_hosts
 
 
 # Application definition
@@ -118,12 +136,15 @@ ASGI_APPLICATION = 'aml_system.asgi.application' if HAS_CHANNELS else None
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'aml_database',
-        'USER': 'postgres',
-        'PASSWORD': 'Launaxe123!',  # Change this to your PostgreSQL password
-        'HOST': 'localhost',
-        'PORT': '5432',
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': os.getenv('DB_NAME'),
+        'USER': os.getenv('DB_USER'),
+        'PASSWORD': os.getenv('DB_PASSWORD'),
+        'HOST': os.getenv('DB_HOST'),
+        'PORT': os.getenv('DB_PORT'),
+        'OPTIONS': {
+            'charset': 'utf8mb4',
+        },
     }
 }
 
@@ -226,13 +247,13 @@ SESSION_COOKIE_SECURE = False  # Set True in production with HTTPS
 CSRF_COOKIE_SECURE = False  # Set True in production with HTTPS
 
 # AML System Settings
-AML_RISK_THRESHOLD_HIGH = 0.7
-AML_RISK_THRESHOLD_MEDIUM = 0.4
-AML_MONITORING_ENABLED = True
+AML_RISK_THRESHOLD_HIGH = float(os.getenv('AML_RISK_THRESHOLD_HIGH', '0.7'))
+AML_RISK_THRESHOLD_MEDIUM = float(os.getenv('AML_RISK_THRESHOLD_MEDIUM', '0.4'))
+AML_MONITORING_ENABLED = os.getenv('AML_MONITORING_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
 
 # Watchlist Screening Settings
 WATCHLIST_FUZZY_THRESHOLD = 0.85  # Default fuzzy match threshold
-WATCHLIST_AUTO_BLOCK_ON_EXACT = True  # Auto-block on exact matches
+WATCHLIST_AUTO_BLOCK_ON_EXACT = os.getenv('AUTO_SCREENING_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')  # Auto-block on exact matches
 WATCHLIST_RESCAN_FREQUENCY_DAYS = 7  # Periodic rescreening
 
 # KYC Settings
@@ -242,7 +263,7 @@ KYC_ENABLE_OCR = True  # Enable OCR for document processing
 
 # SAR Filing Settings
 SAR_FILING_DEADLINE_DAYS = 30  # Days from detection to filing
-SAR_ENABLE_AUTO_GENERATION = True
+SAR_ENABLE_AUTO_GENERATION = os.getenv('AUTO_SAR_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
 SAR_REQUIRE_DIGITAL_SIGNATURE = True
 
 # Evidence & Forensics Settings

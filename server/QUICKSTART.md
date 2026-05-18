@@ -5,7 +5,7 @@ Get your AI-powered Anti-Money Laundering system up and running in minutes!
 ## Prerequisites Checklist
 
 - [ ] Python 3.10+ installed
-- [ ] PostgreSQL 12+ installed and running
+- [ ] MySQL 8.0+ installed and running
 - [ ] Git installed
 - [ ] Virtual environment tool (venv/virtualenv)
 
@@ -29,15 +29,18 @@ pip install -r requirements.txt
 
 ### Step 2: Configure Database
 
-**Create PostgreSQL Database:**
+**Create MySQL Database:**
 
 ```bash
-# Connect to PostgreSQL
-psql -U postgres
+# Login to MySQL
+mysql -u root -p
 
-# In PostgreSQL prompt:
+# In MySQL prompt:
 CREATE DATABASE aml_database;
-\q
+CREATE USER 'aml_user'@'localhost' IDENTIFIED BY 'your_password';
+GRANT ALL PRIVILEGES ON aml_database.* TO 'aml_user'@'localhost';
+FLUSH PRIVILEGES;
+EXIT;
 ```
 
 **Update Database Settings:**
@@ -47,12 +50,12 @@ Edit `aml_system/settings.py`:
 ```python
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'aml_database',
-        'USER': 'postgres',
-        'PASSWORD': 'your_password',  # <-- Change this
-        'HOST': 'localhost',
-        'PORT': '5432',
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': os.getenv('DB_NAME', 'aml_database'),
+        'USER': os.getenv('DB_USER', 'root'),
+        'PASSWORD': os.getenv('DB_PASSWORD', ''),  # <-- Change this
+        'HOST': os.getenv('DB_HOST', '127.0.0.1'),
+        'PORT': os.getenv('DB_PORT', '3306'),
     }
 }
 ```
@@ -217,19 +220,19 @@ curl -X GET http://localhost:8000/api/ml/anomalies/ \
 
 ## Common Issues & Solutions
 
-### Issue: Can't connect to PostgreSQL
+### Issue: Can't connect to MySQL
 
 **Solution:**
 ```bash
-# Check if PostgreSQL is running
+# Check if MySQL is running
 # Windows:
-net start postgresql-x64-XX
+net start MySQL80
 
 # Linux:
-sudo service postgresql start
+sudo service mysql start
 
 # Mac:
-brew services start postgresql
+brew services start mysql
 ```
 
 ### Issue: Migration errors

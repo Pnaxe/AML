@@ -18,6 +18,7 @@ import {
 } from 'recharts'
 import { HiOutlineChartBar, HiOutlineChip, HiOutlineClock, HiOutlineLightningBolt } from 'react-icons/hi'
 import { useAuth } from '../contexts/AuthContext'
+import { fetchJsonWithRetry, isAbortError } from '../contexts/fetchUtils'
 import './Dashboard.css'
 
 type Trend = 'up' | 'down'
@@ -37,193 +38,22 @@ type PerformanceResponse = {
   queueSla: Array<{ day: string; processed: number; withinSla: number }>
 }
 
-type GenericRecord = Record<string, unknown>
-type Paged<T> = { results?: T[] } | T[]
-
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api'
-const ALERT_STATUS_COLORS = ['#22c55e', '#6366f1', '#f97316', '#ef4444', '#94a3b8']
 const PERFORMANCE_CACHE_KEY = 'aml_performance_cache'
 
-function rowsOf<T>(payload: Paged<T>): T[] {
-  return Array.isArray(payload) ? payload : payload.results ?? []
-}
-
-function dateOf(value: unknown): Date | null {
-  if (typeof value !== 'string' || !value) return null
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime()) ? null : parsed
-}
-
-function buildPerformanceData(
-  transactions: GenericRecord[],
-  alerts: GenericRecord[],
-  cases: GenericRecord[],
-  models: GenericRecord[],
-  sarReports: GenericRecord[]
-): PerformanceResponse {
-  const now = new Date()
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const last5Days = Array.from({ length: 5 }, (_, index) => {
-    const day = new Date(startOfToday)
-    day.setDate(startOfToday.getDate() - (4 - index))
-    return day
-  })
-
-  const activeModels = models.filter((row) => String(row.status ?? '').toUpperCase() === 'ACTIVE')
-  const modelAccuracies = models
-    .map((row) => Number(row.accuracy))
-    .filter((value) => Number.isFinite(value) && value > 0)
-
-  const suspiciousTransactions = transactions.filter((row) => Boolean(row.is_suspicious))
-  const riskScores = transactions
-    .map((row) => Number(row.risk_score))
-    .filter((value) => Number.isFinite(value))
-
-  const avgRiskScore = riskScores.length
-    ? `${(riskScores.reduce((sum, value) => sum + value, 0) / riskScores.length * 100).toFixed(1)}%`
-    : '0.0%'
-
-  const todayTransactions = transactions.filter((row) => {
-    const rowDate = dateOf(row.transaction_date ?? row.created_at)
-    return rowDate && rowDate >= startOfToday
-  }).length
-
-  const dailyRiskVsVolume = last5Days.map((day) => {
-    const dayKey = day.toDateString()
-    const dayTransactions = transactions.filter((row) => {
-      const rowDate = dateOf(row.transaction_date ?? row.created_at)
-      return rowDate?.toDateString() === dayKey
-    })
-    const dayScores = dayTransactions
-      .map((row) => Number(row.risk_score))
-      .filter((value) => Number.isFinite(value))
-    const averageScore = dayScores.length
-      ? Number(((dayScores.reduce((sum, value) => sum + value, 0) / dayScores.length) * 100).toFixed(1))
-      : 0
-
-    return {
-      day: day.toLocaleDateString('en-US', { weekday: 'short' }),
-      riskScore: averageScore,
-      transactions: dayTransactions.length,
-    }
-  })
-
-  const alertStatusCounts = alerts.reduce<Record<string, number>>((acc, row) => {
-    const status = String(row.status ?? 'UNKNOWN').toUpperCase()
-    acc[status] = (acc[status] ?? 0) + 1
-    return acc
-  }, {})
-
-  const alertStatusMix = Object.entries(alertStatusCounts).map(([name, value], index) => ({
-    name,
-    value,
-    color: ALERT_STATUS_COLORS[index % ALERT_STATUS_COLORS.length],
-  }))
-
-  const dailyOperations = last5Days.map((day) => {
-    const dayKey = day.toDateString()
-    const dayAlerts = alerts.filter((row) => dateOf(row.triggered_at ?? row.created_at)?.toDateString() === dayKey).length
-    const dayCases = cases.filter((row) => dateOf(row.triggered_at ?? row.created_at)?.toDateString() === dayKey).length
-    const daySar = sarReports.filter((row) => dateOf(row.submitted_at ?? row.created_at)?.toDateString() === dayKey).length
-
-    return {
-      day: day.toLocaleDateString('en-US', { weekday: 'short' }),
-      alerts: dayAlerts,
-      cases: dayCases,
-      sar: daySar,
-    }
-  })
-
-  const modelQuality = models.slice(0, 4).map((row) => {
-    const accuracy = Number(row.accuracy)
-    const normalizedAccuracy = Number.isFinite(accuracy) && accuracy > 0 ? accuracy : 0
-    const precision = Math.max(0, normalizedAccuracy - 0.03)
-    const recall = Math.max(0, normalizedAccuracy - 0.05)
-
-    return {
-      model: String(row.name ?? 'Model').slice(0, 16),
-      accuracy: Number((normalizedAccuracy * 100).toFixed(1)),
-      precision: Number((precision * 100).toFixed(1)),
-      recall: Number((recall * 100).toFixed(1)),
-    }
-  })
-
-  const detectionBySource = [
-    {
-      source: 'Transactions',
-      flagged: suspiciousTransactions.length,
-      normal: Math.max(0, transactions.length - suspiciousTransactions.length),
-    },
-    {
-      source: 'Alerts',
-      flagged: alerts.filter((row) => {
-        const severity = String(row.severity ?? '').toUpperCase()
-        return severity === 'HIGH' || severity === 'CRITICAL'
-      }).length,
-      normal: alerts.filter((row) => {
-        const severity = String(row.severity ?? '').toUpperCase()
-        return severity !== 'HIGH' && severity !== 'CRITICAL'
-      }).length,
-    },
-    {
-      source: 'Cases',
-      flagged: cases.length,
-      normal: Math.max(0, alerts.length - cases.length),
-    },
-  ]
-
-  const queueSla = last5Days.map((day) => {
-    const dayKey = day.toDateString()
-    const processed = alerts.filter((row) => dateOf(row.triggered_at ?? row.created_at)?.toDateString() === dayKey).length
-    const withinSla = alerts.filter((row) => {
-      const rowDate = dateOf(row.triggered_at ?? row.created_at)
-      if (!rowDate || rowDate.toDateString() !== dayKey) return false
-      const severity = String(row.severity ?? '').toUpperCase()
-      return severity !== 'CRITICAL'
-    }).length
-
-    return {
-      day: day.toLocaleDateString('en-US', { weekday: 'short' }),
-      processed,
-      withinSla,
-    }
-  })
-
-  return {
-    kpis: {
-      activeModels: {
-        value: activeModels.length.toLocaleString(),
-        change: `${models.filter((row) => {
-          const status = String(row.status ?? '').toUpperCase()
-          return status === 'TRAINING' || status === 'TESTING'
-        }).length} in pipeline`,
-        trend: 'up',
-      },
-      avgRiskScore: {
-        value: avgRiskScore,
-        change: `${suspiciousTransactions.length.toLocaleString()} suspicious`,
-        trend: 'up',
-      },
-      modelAccuracy: {
-        value: modelAccuracies.length
-          ? `${((modelAccuracies.reduce((sum, value) => sum + value, 0) / modelAccuracies.length) * 100).toFixed(1)}%`
-          : '0.0%',
-        change: `${modelAccuracies.length.toLocaleString()} scored models`,
-        trend: 'up',
-      },
-      transactionThroughput: {
-        value: `${todayTransactions.toLocaleString()} today`,
-        change: `${transactions.length.toLocaleString()} total`,
-        trend: 'up',
-      },
-    },
-    dailyRiskVsVolume,
-    alertStatusMix,
-    dailyOperations,
-    modelQuality,
-    detectionBySource,
-    queueSla,
-  }
+const EMPTY_PERFORMANCE_DATA: PerformanceResponse = {
+  kpis: {
+    activeModels: { value: '0', change: 'No data yet', trend: 'up' },
+    avgRiskScore: { value: '0%', change: 'No data yet', trend: 'up' },
+    modelAccuracy: { value: '0%', change: 'No data yet', trend: 'up' },
+    transactionThroughput: { value: '0/hr', change: 'No data yet', trend: 'up' },
+  },
+  dailyRiskVsVolume: [],
+  alertStatusMix: [],
+  dailyOperations: [],
+  modelQuality: [],
+  detectionBySource: [],
+  queueSla: [],
 }
 
 export const Performance: React.FC = () => {
@@ -233,13 +63,17 @@ export const Performance: React.FC = () => {
   const [data, setData] = useState<PerformanceResponse | null>(null)
 
   useEffect(() => {
+    const controller = new AbortController()
+
     const loadPerformance = async () => {
-      const cachedValue = sessionStorage.getItem(PERFORMANCE_CACHE_KEY)
       setLoading(true)
+      const cachedValue = sessionStorage.getItem(PERFORMANCE_CACHE_KEY)
+      let hasCachedData = false
       if (cachedValue) {
         try {
           const parsed = JSON.parse(cachedValue) as PerformanceResponse
           setData(parsed)
+          hasCachedData = true
         } catch {
           sessionStorage.removeItem(PERFORMANCE_CACHE_KEY)
         }
@@ -250,39 +84,17 @@ export const Performance: React.FC = () => {
       if (token) authHeaders.Authorization = `Token ${token}`
 
       try {
-        const [transactionsRes, alertsRes, casesRes, modelsRes, sarRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/transactions/`, { headers: authHeaders }),
-          fetch(`${API_BASE_URL}/alerts/`, { headers: authHeaders }),
-          fetch(`${API_BASE_URL}/alerts/cases_for_sar/`, { headers: authHeaders }),
-          fetch(`${API_BASE_URL}/ml-models/?model_type=TRANSACTION_RISK`, { headers: authHeaders }),
-          fetch(`${API_BASE_URL}/alerts/sar_reports/`, { headers: authHeaders }),
-        ])
-
-        if (!transactionsRes.ok || !alertsRes.ok || !casesRes.ok || !modelsRes.ok || !sarRes.ok) {
-          throw new Error('Failed to load performance metrics')
-        }
-
-        const [transactionsPayload, alertsPayload, casesPayload, modelsPayload, sarPayload] = await Promise.all([
-          transactionsRes.json(),
-          alertsRes.json(),
-          casesRes.json(),
-          modelsRes.json(),
-          sarRes.json(),
-        ])
-
-        const nextData = buildPerformanceData(
-          rowsOf<GenericRecord>(transactionsPayload),
-          rowsOf<GenericRecord>(alertsPayload),
-          rowsOf<GenericRecord>(casesPayload),
-          rowsOf<GenericRecord>(modelsPayload),
-          rowsOf<GenericRecord>(sarPayload)
+        const nextData = await fetchJsonWithRetry<PerformanceResponse>(
+          `${API_BASE_URL}/analytics/performance/`,
+          { headers: authHeaders, signal: controller.signal }
         )
         setData(nextData)
         sessionStorage.setItem(PERFORMANCE_CACHE_KEY, JSON.stringify(nextData))
       } catch (e) {
-        if (!cachedValue) {
+        if (isAbortError(e)) return
+        if (!hasCachedData) {
           setError(e instanceof Error ? e.message : 'Unable to load performance data')
-          setData(null)
+          setData(EMPTY_PERFORMANCE_DATA)
         }
       } finally {
         setLoading(false)
@@ -290,6 +102,7 @@ export const Performance: React.FC = () => {
     }
 
     void loadPerformance()
+    return () => controller.abort()
   }, [token])
 
   const kpiCards = useMemo(() => {
@@ -308,18 +121,30 @@ export const Performance: React.FC = () => {
       key={key}
       className={`chart-card ${wide ? 'chart-wide' : ''} ${full ? 'chart-full' : ''} ${summary ? 'chart-summary' : ''}`}
     >
-      <div className="chart-title dashboard-skeleton dashboard-title-skeleton" />
-      <div className="dashboard-skeleton dashboard-chart-skeleton" />
+      <div className="chart-title dashboard-skeleton dashboard-title-skeleton" aria-hidden="true" />
+      {summary ? (
+        <div className="dashboard-summary-skeleton" aria-hidden="true">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div key={`perf-summary-skeleton-${key}-${index}`} className="dashboard-summary-skeleton-row">
+              <div className="dashboard-skeleton dashboard-summary-value-skeleton" />
+              <div className="dashboard-skeleton dashboard-summary-label-skeleton" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="dashboard-skeleton dashboard-chart-skeleton" aria-hidden="true" />
+      )}
     </div>
   )
+  const showSkeleton = loading || !data
 
   return (
-    <div className="dashboard-overview">
+    <div className="dashboard-overview" aria-busy={showSkeleton}>
       <div className="dashboard-header">
-        {loading ? (
+        {showSkeleton ? (
           <>
-            <div className="dashboard-title-skeleton dashboard-skeleton" />
-            <div className="dashboard-desc-skeleton dashboard-skeleton" />
+            <div className="dashboard-skeleton dashboard-title-skeleton" aria-hidden="true" />
+            <div className="dashboard-skeleton dashboard-desc-skeleton" aria-hidden="true" />
           </>
         ) : (
           <>
@@ -336,7 +161,7 @@ export const Performance: React.FC = () => {
       )}
 
       <div className="dashboard-cards">
-        {loading && !data
+        {showSkeleton
           ? skeletonCards.map((_, index) => (
               <div key={`perf-kpi-skeleton-${index}`} className="dashboard-card dashboard-card-skeleton">
                 <div className="dashboard-card-icon-skeleton dashboard-skeleton" />
@@ -360,7 +185,7 @@ export const Performance: React.FC = () => {
         })}
       </div>
 
-      {loading && !data ? (
+      {showSkeleton ? (
         <>
           <div className="dashboard-charts">
             {renderChartSkeleton('p1', true)}

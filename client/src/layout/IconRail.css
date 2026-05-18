@@ -122,5 +122,9 @@
   .icon-rail {
     display: none;
   }
+
+  .dashboard-container.menu-open .icon-rail {
+    display: flex;
+  }
 }
 

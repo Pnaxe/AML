@@ -3,7 +3,6 @@ import {
   HiOutlineSearch,
   HiOutlineX,
   HiOutlineEye,
-  HiOutlineDownload,
   HiOutlineDatabase,
 } from 'react-icons/hi'
 import { useAuth } from '../contexts/AuthContext'
@@ -140,14 +139,16 @@ export const DataManagement: React.FC<DataManagementProps> = ({ onOpenDatasetFor
 
   const loadAssets = async () => {
     const cachedValue = sessionStorage.getItem(DATA_MANAGEMENT_CACHE_KEY)
-    setLoading(true)
+    let hasCachedData = false
     if (cachedValue) {
       try {
         setAssets(JSON.parse(cachedValue) as DataAsset[])
+        hasCachedData = true
       } catch {
         sessionStorage.removeItem(DATA_MANAGEMENT_CACHE_KEY)
       }
     }
+    setLoading(!hasCachedData)
     setError(null)
     try {
       const [transactionsRes, customersRes, alertsRes, sourcesRes, datasetsRes] = await Promise.all([
@@ -278,10 +279,6 @@ export const DataManagement: React.FC<DataManagementProps> = ({ onOpenDatasetFor
           <p className="customers-subtitle">Manage live AML datasets, uploaded files, and sync status from the backend.</p>
         </div>
         <div className="customers-header-actions">
-          <button className="btn-export-action btn-with-icon" type="button" onClick={() => void loadAssets()} disabled={loading}>
-            <HiOutlineDownload size={16} aria-hidden />
-            <span>{loading ? 'Refreshing...' : 'Refresh'}</span>
-          </button>
           <button className="btn-primary-action btn-with-icon" type="button" onClick={handleOpenAddModal}>
             <HiOutlineDatabase size={16} aria-hidden />
             <span>Add Dataset</span>

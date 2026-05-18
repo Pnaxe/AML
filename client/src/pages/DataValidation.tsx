@@ -141,16 +141,18 @@ export const DataValidation: React.FC = () => {
   useEffect(() => {
     const loadDatasets = async () => {
       const cachedValue = sessionStorage.getItem(DATA_VALIDATION_CACHE_KEY)
-      setLoading(true)
+      let hasCachedData = false
       if (cachedValue) {
         try {
           const parsed = JSON.parse(cachedValue) as DatasetValidation[]
           setDatasets(parsed)
           setSelectedFile((current) => current || parsed[0]?.file || '')
+          hasCachedData = true
         } catch {
           sessionStorage.removeItem(DATA_VALIDATION_CACHE_KEY)
         }
       }
+      setLoading(!hasCachedData)
       setError(null)
       try {
         const [transactionsRes, customersRes, alertsRes, uploadedRes] = await Promise.all([

@@ -1,8 +1,11 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { HiOutlineSearch, HiOutlineX, HiOutlineMail, HiOutlinePhone, HiOutlineLocationMarker, HiOutlineGlobe, HiOutlineEye, HiOutlinePencil, HiOutlineTrash, HiOutlineDocument, HiOutlineDownload, HiOutlineArrowLeft, HiOutlineCheckCircle, HiOutlineXCircle, HiOutlineClock, HiOutlinePlus, HiOutlineExclamation } from 'react-icons/hi'
 import { useToast } from '../contexts/ToastContext'
+import { useAuth } from '../contexts/AuthContext'
 import './Customers.css'
 import './KYC.css'
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api'
 
 type ProfileType = 'Business' | 'Individual'
 type VettingStatus = 'Not started' | 'In review' | 'Authentic' | 'Failed'
@@ -102,38 +105,118 @@ type OnboardingRecord = {
   individualKyc?: IndividualKycDetails
 }
 
-const seedRecords: OnboardingRecord[] = [
-  {
-    id: 'ONB-001234',
-    applicantName: 'Acme Trading Ltd',
-    profileType: 'Business',
-    docsSubmitted: true,
-    vetting: 'Authentic',
-    watchlist: 'Clear',
-    blacklist: 'Clear',
-    pep: 'Clear',
-    decision: 'Approved',
-    customer: 'Customer',
-    monitoring: 'Active',
-    lastUpdated: '11/21/2025',
-  },
-  {
-    id: 'ONB-001235',
-    applicantName: 'Liam Ndlovu',
-    profileType: 'Individual',
-    docsSubmitted: false,
-    vetting: 'Not started',
-    watchlist: 'Not started',
-    blacklist: 'Not started',
-    pep: 'Not started',
-    decision: 'Pending',
-    customer: 'Prospect',
-    monitoring: 'Not eligible',
-    lastUpdated: '11/22/2025',
-  },
-]
-
 const PAGE_SIZE = 25
+
+type Paged<T> = { results?: T[] } | T[]
+
+type BackendCustomer = {
+  id: number
+  customer_id: string
+  customer_type: 'INDIVIDUAL' | 'CORPORATE' | 'GOVERNMENT' | 'NON_PROFIT'
+  first_name: string
+  last_name: string
+  company_name: string
+  email: string
+  phone_number: string
+  address: string
+  country: string
+  risk_level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+  is_pep: boolean
+  is_sanctioned: boolean
+  created_at: string
+  updated_at: string
+}
+
+type BackendKycProfile = {
+  id: number
+  customer: number
+  verification_status: 'PENDING' | 'IN_PROGRESS' | 'VERIFIED' | 'REJECTED' | 'EXPIRED' | 'REQUIRES_UPDATE'
+  kyc_risk_level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+  source_of_funds: string
+  nature_of_business: string
+  business_sector: string
+  verification_notes: string
+  rejection_reason: string
+  updated_at: string
+}
+
+function rowsOf<T>(payload: Paged<T>): T[] {
+  return Array.isArray(payload) ? payload : payload.results ?? []
+}
+
+function fmtDate(value: string): string {
+  if (!value) return today()
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? today() : parsed.toLocaleDateString('en-US')
+}
+
+function mapStatus(
+  verificationStatus: BackendKycProfile['verification_status'],
+  hasPep: boolean,
+  hasSanctions: boolean,
+): Pick<OnboardingRecord, 'docsSubmitted' | 'vetting' | 'watchlist' | 'blacklist' | 'pep' | 'decision' | 'customer' | 'monitoring'> {
+  const docsSubmitted = verificationStatus !== 'PENDING'
+  const vetting: VettingStatus =
+    verificationStatus === 'VERIFIED' ? 'Authentic' :
+    verificationStatus === 'REJECTED' ? 'Failed' :
+    verificationStatus === 'IN_PROGRESS' ? 'In review' :
+    'Not started'
+
+  const screeningBase: ScreeningStatus =
+    verificationStatus === 'PENDING' ? 'Not started' :
+    verificationStatus === 'IN_PROGRESS' ? 'In progress' :
+    'Clear'
+
+  const decision: DecisionStatus =
+    verificationStatus === 'VERIFIED' ? 'Approved' :
+    verificationStatus === 'REJECTED' ? 'Rejected' :
+    'Pending'
+
+  return {
+    docsSubmitted,
+    vetting,
+    watchlist: hasSanctions ? 'Match found' : screeningBase,
+    blacklist: hasSanctions ? 'Match found' : screeningBase,
+    pep: hasPep ? 'Match found' : screeningBase,
+    decision,
+    customer: decision === 'Approved' ? 'Customer' : decision === 'Rejected' ? 'Rejected' : 'Prospect',
+    monitoring: decision === 'Approved' ? 'Active' : verificationStatus === 'IN_PROGRESS' ? 'Queued' : 'Not eligible',
+  }
+}
+
+function toOnboardingRecord(customer: BackendCustomer, profile: BackendKycProfile | undefined): OnboardingRecord {
+  const applicantName =
+    customer.customer_type === 'INDIVIDUAL'
+      ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() || customer.customer_id
+      : customer.company_name || customer.customer_id
+
+  const derived = mapStatus(profile?.verification_status ?? 'PENDING', customer.is_pep, customer.is_sanctioned)
+  return {
+    id: customer.customer_id,
+    applicantName,
+    profileType: customer.customer_type === 'INDIVIDUAL' ? 'Individual' : 'Business',
+    ...derived,
+    lastUpdated: fmtDate(profile?.updated_at || customer.updated_at || customer.created_at),
+    businessKyc: customer.customer_type === 'INDIVIDUAL' ? undefined : {
+      registeredCompanyName: customer.company_name || undefined,
+      officialEmail: customer.email || undefined,
+      phoneNumber: customer.phone_number || undefined,
+      registeredOfficeAddress: customer.address || undefined,
+      addressCountry: customer.country || undefined,
+      sourceOfFunds: profile?.source_of_funds || undefined,
+      natureOfBusiness: profile?.nature_of_business || undefined,
+      industrySector: profile?.business_sector || undefined,
+    },
+    individualKyc: customer.customer_type !== 'INDIVIDUAL' ? undefined : {
+      fullLegalName: applicantName || undefined,
+      emailAddress: customer.email || undefined,
+      mobilePhoneNumber: customer.phone_number || undefined,
+      residentialAddress: customer.address || undefined,
+      countryOfResidence: customer.country || undefined,
+      sourceOfFunds: profile?.source_of_funds || undefined,
+    },
+  }
+}
 
 const screeningClear = (r: OnboardingRecord) => r.watchlist === 'Clear' && r.blacklist === 'Clear' && r.pep === 'Clear'
 const screeningAnyMatch = (r: OnboardingRecord) => [r.watchlist, r.blacklist, r.pep].includes('Match found')
@@ -492,7 +575,11 @@ function ViewProfileContent({
 
 export const KYC: React.FC = () => {
   const { showToast } = useToast()
-  const [records, setRecords] = useState<OnboardingRecord[]>(seedRecords)
+  const { token } = useAuth()
+  const [records, setRecords] = useState<OnboardingRecord[]>([])
+  const [customerIndex, setCustomerIndex] = useState<Record<string, BackendCustomer>>({})
+  const [kycProfileIndex, setKycProfileIndex] = useState<Record<number, BackendKycProfile>>({})
+  const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [activeSearchTerm, setActiveSearchTerm] = useState('')
   const [decisionFilter, setDecisionFilter] = useState('')
@@ -571,6 +658,44 @@ export const KYC: React.FC = () => {
   const [newIndividualSanctionsConsent, setNewIndividualSanctionsConsent] = useState(false)
   const [newIndividualTermsAccepted, setNewIndividualTermsAccepted] = useState(false)
 
+  const authHeaders = useMemo(() => {
+    const headers: Record<string, string> = {}
+    if (token) headers.Authorization = `Token ${token}`
+    return headers
+  }, [token])
+
+  const loadRecords = React.useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const [customersRes, profilesRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/customers/`, { headers: authHeaders }),
+        fetch(`${API_BASE_URL}/kyc-profiles/`, { headers: authHeaders }),
+      ])
+      if (!customersRes.ok || !profilesRes.ok) throw new Error('Failed to load KYC data')
+
+      const customersPayload = (await customersRes.json()) as Paged<BackendCustomer>
+      const profilesPayload = (await profilesRes.json()) as Paged<BackendKycProfile>
+      const customers = rowsOf(customersPayload)
+      const profiles = rowsOf(profilesPayload)
+      const profileMap = Object.fromEntries(profiles.map((profile) => [profile.customer, profile]))
+      const customerMap = Object.fromEntries(customers.map((customer) => [customer.customer_id, customer]))
+      const kycMap = Object.fromEntries(profiles.map((profile) => [profile.customer, profile]))
+
+      setCustomerIndex(customerMap)
+      setKycProfileIndex(kycMap)
+      setRecords(customers.map((customer) => toOnboardingRecord(customer, profileMap[customer.id])))
+    } catch (error) {
+      console.error(error)
+      showToast('Unable to load KYC profiles.')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [authHeaders, showToast])
+
+  useEffect(() => {
+    void loadRecords()
+  }, [loadRecords])
+
   const filteredRecords = useMemo(() => {
     const term = activeSearchTerm.toLowerCase()
     return records.filter((r) => {
@@ -621,16 +746,84 @@ export const KYC: React.FC = () => {
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!editRecord) return
-    patchRecord(editRecord.id, (r) => ({ ...r, applicantName: editApplicantName.trim(), decision: editDecision, lastUpdated: today() }))
-    handleCloseEditModal()
-    showToast(`Updated "${editApplicantName.trim()}".`)
+
+    const save = async () => {
+      const customer = customerIndex[editRecord.id]
+      if (!customer) return
+
+      const customerBody =
+        customer.customer_type === 'INDIVIDUAL'
+          ? {
+              first_name: editApplicantName.trim().split(/\s+/).slice(0, -1).join(' ') || editApplicantName.trim(),
+              last_name: editApplicantName.trim().split(/\s+/).slice(-1).join(' '),
+            }
+          : {
+              company_name: editApplicantName.trim(),
+            }
+
+      try {
+        const updateResponse = await fetch(`${API_BASE_URL}/customers/${customer.id}/`, {
+          method: 'PATCH',
+          headers: {
+            ...authHeaders,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(customerBody),
+        })
+        if (!updateResponse.ok) throw new Error('Failed to update customer')
+
+        const profile = kycProfileIndex[customer.id]
+        if (editDecision === 'Approved') {
+          await fetch(`${API_BASE_URL}/customers/${customer.id}/accept/`, {
+            method: 'POST',
+            headers: authHeaders,
+          })
+        } else if (editDecision === 'Rejected' && profile) {
+          await fetch(`${API_BASE_URL}/kyc-profiles/${profile.id}/reject/`, {
+            method: 'POST',
+            headers: {
+              ...authHeaders,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ rejection_reason: 'Rejected from KYC review' }),
+          })
+        }
+
+        await loadRecords()
+        handleCloseEditModal()
+        showToast(`Updated "${editApplicantName.trim()}".`)
+      } catch (error) {
+        console.error(error)
+        showToast('Unable to update profile.')
+      }
+    }
+
+    void save()
   }
   const handleConfirmDelete = () => {
     if (!deleteRecord) return
-    setRecords((prev) => prev.filter((r) => r.id !== deleteRecord.id))
-    const name = deleteRecord.applicantName
-    handleCloseDeleteModal()
-    showToast(`Deleted profile "${name}".`)
+
+    const remove = async () => {
+      const customer = customerIndex[deleteRecord.id]
+      if (!customer) return
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/customers/${customer.id}/`, {
+          method: 'DELETE',
+          headers: authHeaders,
+        })
+        if (!response.ok && response.status !== 204) throw new Error('Failed to delete profile')
+        const name = deleteRecord.applicantName
+        handleCloseDeleteModal()
+        await loadRecords()
+        showToast(`Deleted profile "${name}".`)
+      } catch (error) {
+        console.error(error)
+        showToast('Unable to delete profile.')
+      }
+    }
+
+    void remove()
   }
   const fileNameFromInput = (e: React.ChangeEvent<HTMLInputElement>) => e.target.files?.[0]?.name ?? ''
 
@@ -707,105 +900,84 @@ export const KYC: React.FC = () => {
   const addProfile = (e: React.FormEvent) => {
     e.preventDefault()
     if (!newName.trim()) return
-    const nextId = `ONB-${(1234 + records.length + 1).toString().padStart(6, '0')}`
-    const base: OnboardingRecord = {
-      id: nextId,
-      applicantName: newName.trim(),
-      profileType: newType,
-      docsSubmitted: false,
-      vetting: 'Not started',
-      watchlist: 'Not started',
-      blacklist: 'Not started',
-      pep: 'Not started',
-      decision: 'Pending',
-      customer: 'Prospect',
-      monitoring: 'Not eligible',
-      lastUpdated: today(),
+
+    const create = async () => {
+      const customerBody =
+        newType === 'Business'
+          ? {
+              customer_type: 'CORPORATE',
+              company_name: newName.trim(),
+              registration_number: newBusinessRegistration.trim(),
+              email: newBusinessEmail.trim(),
+              phone_number: newBusinessPhone.trim(),
+              address: newBusinessRegisteredAddress.trim(),
+              country: newBusinessCountry.trim() || newBusinessAddressCountry.trim(),
+            }
+          : {
+              customer_type: 'INDIVIDUAL',
+              first_name: newName.trim().split(/\s+/).slice(0, -1).join(' ') || newName.trim(),
+              last_name: newName.trim().split(/\s+/).slice(-1).join(' '),
+              date_of_birth: newIndividualDob || null,
+              email: newIndividualEmail.trim(),
+              phone_number: newIndividualMobilePhone.trim(),
+              address: newIndividualResidentialAddress.trim(),
+              country: newIndividualCountry.trim(),
+            }
+
+      try {
+        const customerRes = await fetch(`${API_BASE_URL}/customers/`, {
+          method: 'POST',
+          headers: {
+            ...authHeaders,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(customerBody),
+        })
+        if (!customerRes.ok) throw new Error('Failed to create customer')
+
+        const createdCustomer = (await customerRes.json()) as BackendCustomer
+        const profileLookupRes = await fetch(`${API_BASE_URL}/kyc-profiles/?customer=${createdCustomer.id}`, {
+          headers: authHeaders,
+        })
+        if (profileLookupRes.ok) {
+          const profilePayload = (await profileLookupRes.json()) as Paged<BackendKycProfile>
+          const createdProfile = rowsOf(profilePayload)[0]
+          if (createdProfile) {
+            const profileBody =
+              newType === 'Business'
+                ? {
+                    source_of_funds: newBusinessSourceOfFunds.trim(),
+                    nature_of_business: newBusinessNatureOfBusiness.trim(),
+                    business_sector: newBusinessIndustrySector.trim(),
+                    verification_notes: newBusinessDocumentsProvided.trim(),
+                  }
+                : {
+                    source_of_funds: newIndividualSourceOfFunds.trim(),
+                    verification_notes: [newIndividualOccupation.trim(), newIndividualIncomeRange.trim()].filter(Boolean).join(' | '),
+                  }
+
+            await fetch(`${API_BASE_URL}/kyc-profiles/${createdProfile.id}/`, {
+              method: 'PATCH',
+              headers: {
+                ...authHeaders,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(profileBody),
+            })
+          }
+        }
+
+        await loadRecords()
+        setCurrentPage(1)
+        handleCloseAddModal()
+        showToast(`Created onboarding profile for "${newName.trim()}".`)
+      } catch (error) {
+        console.error(error)
+        showToast('Unable to create onboarding profile.')
+      }
     }
 
-    const newRecord: OnboardingRecord =
-      newType === 'Business'
-        ? {
-          ...base,
-          businessKyc: {
-            registeredCompanyName: newName.trim() || undefined,
-            tradingName: newBusinessTradingName || undefined,
-            companyRegistrationNumber: newBusinessRegistration || undefined,
-            dateOfIncorporation: newBusinessDateOfIncorporation || undefined,
-            countryOfIncorporation: newBusinessCountry || undefined,
-            businessType: newBusinessType || undefined,
-            natureOfBusiness: newBusinessNatureOfBusiness || undefined,
-            industrySector: newBusinessIndustrySector || undefined,
-            taxNumber: newBusinessTin || undefined,
-            registeredOfficeAddress: newBusinessRegisteredAddress || undefined,
-            tradingAddress: newBusinessTradingAddress || undefined,
-            addressCountry: newBusinessAddressCountry || undefined,
-            postalCode: newBusinessPostalCode || undefined,
-            proofOfAddressDocument: newBusinessProofOfAddressFile || undefined,
-            officialEmail: newBusinessEmail || undefined,
-            phoneNumber: newBusinessPhone || undefined,
-            website: newBusinessWebsite || undefined,
-            documentsProvided: newBusinessDocumentsProvided || undefined,
-            directorsInfo: newBusinessDirectorsInfo || undefined,
-            uboDetails: newBusinessUboDetails || undefined,
-            authorizedSignatoriesInfo: newBusinessSignatoriesInfo || undefined,
-            sourceOfFunds: newBusinessSourceOfFunds || undefined,
-            expectedMonthlyTurnover: newBusinessMonthlyTurnover || undefined,
-            expectedTransactionVolume: newBusinessTransactionVolume || undefined,
-            primaryBankingCountries: newBusinessBankingCountries || undefined,
-            purposeOfAccount: newBusinessPurposeOfAccount || undefined,
-            pepDeclaration: newBusinessPepDeclaration || undefined,
-            sanctionsDeclaration: newBusinessSanctionsDeclaration || undefined,
-            fatcaCrsStatus: newBusinessFatcaCrsStatus || undefined,
-            regulatoryConfirmations: newBusinessRegulatoryConfirmations || undefined,
-            boardResolutionProvided: newBusinessBoardResolution || undefined,
-            termsAccepted: newBusinessTermsAccepted || undefined,
-          },
-        }
-        : {
-          ...base,
-          individualKyc: {
-            fullLegalName: newName.trim() || undefined,
-            dateOfBirth: newIndividualDob || undefined,
-            gender: newIndividualGender || undefined,
-            nationality: newIndividualNationality || undefined,
-            countryOfResidence: newIndividualCountry || undefined,
-            maritalStatus: newIndividualMaritalStatus || undefined,
-            nationalIdOrPassportNumber: newIndividualIdNumber || undefined,
-            taxIdentificationNumber: newIndividualTin || undefined,
-            mobilePhoneNumber: newIndividualMobilePhone || undefined,
-            emailAddress: newIndividualEmail || undefined,
-            residentialAddress: newIndividualResidentialAddress || undefined,
-            postalAddress: newIndividualPostalAddress || undefined,
-            idType: newIndividualIdType || undefined,
-            idNumber: newIndividualIdNumber || undefined,
-            idIssueDate: newIndividualIdIssueDate || undefined,
-            idExpiryDate: newIndividualIdExpiryDate || undefined,
-            idIssuingCountry: newIndividualIssuingCountry || undefined,
-            idDocumentFrontBackFile: newIndividualIdDocumentFile || undefined,
-            selfieOrLivePhotoFile: newIndividualSelfieFile || undefined,
-            proofOfAddressDocumentFile: newIndividualPoaDocumentFile || undefined,
-            addressVerificationDate: newIndividualAddressVerificationDate || undefined,
-            proofOfAddressType: newIndividualProofType || undefined,
-            proofOfAddressIssuerName: newIndividualProofIssuerName || undefined,
-            employmentStatus: newIndividualEmploymentStatus || undefined,
-            employerName: newIndividualEmployerName || undefined,
-            occupationOrJobTitle: newIndividualOccupation || undefined,
-            sourceOfFunds: newIndividualSourceOfFunds || undefined,
-            estimatedMonthlyIncomeRange: newIndividualIncomeRange || undefined,
-            expectedAccountActivity: newIndividualExpectedActivity || undefined,
-            politicallyExposedPerson: newIndividualPep || undefined,
-            relatedToPep: newIndividualRelatedPep || undefined,
-            countryOfTaxResidence: newIndividualTaxResidenceCountry || undefined,
-            fatcaCrsDeclaration: newIndividualFatcaDeclaration || undefined,
-            sanctionsScreeningConsent: newIndividualSanctionsConsent,
-            termsAccepted: newIndividualTermsAccepted,
-          },
-        }
-    setRecords((prev) => [newRecord, ...prev])
-    setCurrentPage(1)
-    handleCloseAddModal()
-    showToast(`Created onboarding profile for "${newRecord.applicantName}".`)
+    void create()
   }
 
   const patchRecord = (id: string, updater: (r: OnboardingRecord) => OnboardingRecord) => {
@@ -813,30 +985,52 @@ export const KYC: React.FC = () => {
   }
 
   const advance = (id: string) => {
-    patchRecord(id, (r) => {
-      const next = { ...r, lastUpdated: today() }
-      if (!next.docsSubmitted) {
-        next.docsSubmitted = true
-        next.vetting = 'In review'
-      } else if (next.vetting === 'In review' || next.vetting === 'Not started') {
-        next.vetting = 'Authentic'
-      } else if (next.watchlist === 'Not started' || next.blacklist === 'Not started' || next.pep === 'Not started') {
-        next.watchlist = 'Clear'
-        next.blacklist = 'Clear'
-        next.pep = 'Clear'
-      } else if (screeningClear(next) && next.decision === 'Pending') {
-        next.decision = 'Approved'
-        next.customer = 'Customer'
-        next.monitoring = 'Queued'
-      } else if (next.monitoring === 'Queued') {
-        next.monitoring = 'Active'
+    const move = async () => {
+      const customer = customerIndex[id]
+      if (!customer) return
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/customers/${customer.id}/move_to_screening/`, {
+          method: 'POST',
+          headers: authHeaders,
+        })
+        if (!response.ok) throw new Error('Failed to move profile to screening')
+        await loadRecords()
+      } catch (error) {
+        console.error(error)
+        showToast('Unable to move profile to screening.')
       }
-      return next
-    })
+    }
+
+    void move()
   }
 
   const reject = (id: string) => {
-    patchRecord(id, (r) => ({ ...r, decision: 'Rejected', customer: 'Rejected', monitoring: 'Not eligible', lastUpdated: today() }))
+    const decline = async () => {
+      const customer = customerIndex[id]
+      if (!customer) return
+      const profile = kycProfileIndex[customer.id]
+
+      try {
+        if (profile) {
+          const response = await fetch(`${API_BASE_URL}/kyc-profiles/${profile.id}/reject/`, {
+            method: 'POST',
+            headers: {
+              ...authHeaders,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ rejection_reason: 'Rejected from KYC review' }),
+          })
+          if (!response.ok) throw new Error('Failed to reject profile')
+        }
+        await loadRecords()
+      } catch (error) {
+        console.error(error)
+        showToast('Unable to reject profile.')
+      }
+    }
+
+    void decline()
   }
 
   const markMatch = (id: string) => {
@@ -956,8 +1150,16 @@ export const KYC: React.FC = () => {
               </div>
             </div>
 
-            <div className="customers-table-card-outer">
-              <div className="report-content-container ecl-table-container">
+            <div className={`customers-table-card-outer ${!isLoading && pageRecords.length === 0 ? 'table-empty-state' : ''}`}>
+              <div className="report-content-container ecl-table-container table-loading-shell">
+                {isLoading && (
+                  <div className="table-loading-overlay" aria-hidden="true">
+                    <div className="table-loading-indicator">
+                      <div className="table-loading-spinner" />
+                      <span className="table-loading-text">Loading KYC profiles...</span>
+                    </div>
+                  </div>
+                )}
                 <table className="ecl-table">
                   <thead>
                     <tr>
@@ -971,7 +1173,7 @@ export const KYC: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {pageRecords.map((r) => (
+                    {!isLoading && pageRecords.map((r) => (
                       <tr key={r.id}>
                         <td className="customer-id">{r.id}</td>
                         <td>{r.applicantName}</td>
@@ -1015,7 +1217,7 @@ export const KYC: React.FC = () => {
                         </td>
                       </tr>
                     ))}
-                    {Array.from({ length: Math.max(0, PAGE_SIZE - pageRecords.length) }).map((_, idx) => (
+                    {!isLoading && Array.from({ length: Math.max(0, PAGE_SIZE - pageRecords.length) }).map((_, idx) => (
                       <tr key={`empty-${idx}`}>
                         {Array.from({ length: colCount }).map((_, cellIdx) => (
                           <td key={cellIdx}>&nbsp;</td>

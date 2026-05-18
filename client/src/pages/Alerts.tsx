@@ -106,7 +106,7 @@ function flaggedTransactionsToAlerts(
 
 export const Alerts: React.FC = () => {
   const [alerts, setAlerts] = useState<AlertItem[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [activeSearchTerm, setActiveSearchTerm] = useState('')
@@ -378,14 +378,22 @@ export const Alerts: React.FC = () => {
           </div>
         </div>
 
-        <div className={`customers-table-card-outer ${!error && pageRows.length === 0 ? 'table-empty-state' : ''}`}>
-          {!error && pageRows.length === 0 && (
+        <div className={`customers-table-card-outer ${!loading && !error && pageRows.length === 0 ? 'table-empty-state' : ''}`}>
+          {!loading && !error && pageRows.length === 0 && (
             <div className="table-empty-watermark" aria-hidden="true">
               <HiOutlineBell size={42} />
               <span>No Alerts</span>
             </div>
           )}
-          <div className="report-content-container ecl-table-container">
+          <div className="report-content-container ecl-table-container table-loading-shell">
+            {loading && (
+              <div className="table-loading-overlay" aria-hidden="true">
+                <div className="table-loading-indicator">
+                  <div className="table-loading-spinner" />
+                  <span className="table-loading-text">Loading alerts...</span>
+                </div>
+              </div>
+            )}
             <table className="ecl-table">
               <thead>
                 <tr>
@@ -403,7 +411,7 @@ export const Alerts: React.FC = () => {
                 {error ? (
                   <tr><td colSpan={8} className="muted">{error}</td></tr>
                 ) : (
-                  pageRows.map((a) => (
+                  !loading && pageRows.map((a) => (
                     <tr key={a.id}>
                       <td className="customer-id">{a.alert_id}</td>
                       <td>{a.customer_name} <span className="muted">({a.customer_id})</span></td>
@@ -420,7 +428,7 @@ export const Alerts: React.FC = () => {
                     </tr>
                   ))
                 )}
-                {!error && Array.from({ length: Math.max(0, PAGE_SIZE - pageRows.length) }).map((_, idx) => (
+                {!loading && !error && Array.from({ length: Math.max(0, PAGE_SIZE - pageRows.length) }).map((_, idx) => (
                   <tr key={`empty-${idx}`}>{Array.from({ length: 8 }).map((__, c) => <td key={c}>&nbsp;</td>)}</tr>
                 ))}
               </tbody>

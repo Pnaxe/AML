@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import jsPDF from 'jspdf'
 import { HiOutlineSearch, HiOutlineX, HiOutlineRefresh, HiOutlineEye, HiOutlineArrowLeft, HiOutlineCheckCircle, HiOutlineXCircle, HiOutlineDownload } from 'react-icons/hi'
+import logoSrc from '../images/AS logo.png'
 import './Customers.css'
 import './KYC.css'
 
@@ -30,6 +31,18 @@ type ScreeningMatch = {
   watchlist_name: string
   source: string
   detected_at: string | null
+  evidence_data?: Record<string, unknown>
+}
+
+type ApiSourceCheck = {
+  id: string
+  name: string
+  type: 'BUILT_IN' | 'CUSTOM' | 'EXTERNAL'
+  status: 'CONNECTED' | 'NOT_CONFIGURED' | 'SEARCHED' | 'ERROR'
+  used_for: string
+  last_four: string
+  error?: string
+  total_hits?: number
 }
 
 type CustomerReportResponse = {
@@ -54,7 +67,13 @@ type CustomerReportResponse = {
     open_matches: number
     confirmed_matches: number
     false_positive_matches: number
+    apis_checked?: number
+    total_api_sources?: number
+    risk_flags?: string[]
+    overall_status?: 'CLEAR' | 'REVIEW' | 'BLOCK'
+    screening_date?: string
   }
+  api_sources?: ApiSourceCheck[]
   matches: ScreeningMatch[]
 }
 
@@ -71,6 +90,72 @@ function formatDate(value: string): string {
   const dt = new Date(value)
   if (Number.isNaN(dt.getTime())) return value
   return dt.toLocaleDateString('en-US')
+}
+
+function formatDateTime(value: string): string {
+  if (!value) return '-'
+  const dt = new Date(value)
+  if (Number.isNaN(dt.getTime())) return value
+  return dt.toLocaleString('en-US')
+}
+
+const DETAIL_LABELS: Record<string, string> = {
+  id: 'Dilisense Record ID',
+  source_id: 'Source ID',
+  source_type: 'Source Type',
+  name: 'Name',
+  entity_type: 'Entity Type',
+  pep_type: 'PEP Type',
+  date_of_birth: 'Date of Birth',
+  place_of_birth: 'Place of Birth',
+  citizenship: 'Citizenship',
+  nationality: 'Nationality',
+  address: 'Address',
+  sanction_details: 'Sanction Details',
+  positions: 'Positions',
+  description: 'Description',
+  links: 'Links',
+  gender: 'Gender',
+  listed_on: 'Listed On',
+  last_updated: 'Last Updated',
+  listing_reason: 'Listing Reason',
+  program: 'Program',
+}
+
+function labelForDetail(key: string): string {
+  return DETAIL_LABELS[key] ?? key.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+function detailEntries(details?: Record<string, unknown>): Array<[string, string]> {
+  return Object.entries(details ?? {})
+    .map(([key, value]) => {
+      if (value == null) return [key, ''] as [string, string]
+      if (Array.isArray(value)) return [key, value.join(', ')] as [string, string]
+      if (typeof value === 'object') return [key, JSON.stringify(value)] as [string, string]
+      return [key, String(value)] as [string, string]
+    })
+    .filter(([, value]) => value.trim().length > 0)
+}
+
+function loadImageDataUrl(src: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.crossOrigin = 'anonymous'
+    image.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        reject(new Error('Unable to render logo'))
+        return
+      }
+      ctx.drawImage(image, 0, 0)
+      resolve(canvas.toDataURL('image/png'))
+    }
+    image.onerror = reject
+    image.src = src
+  })
 }
 
 function formatDateInputValue(value: string): string {
@@ -216,7 +301,142 @@ export const Screening: React.FC<ScreeningProps> = ({ variant = 'screening' }) =
     setProfileReport(null)
   }
 
-  const handleDownloadReport = () => {
+  const handleDownloadReport = async () => {
+    if (!profileReport || !selectedProfile) return
+
+    const customer = profileReport.customer
+    const summary = profileReport.summary
+    const matches = profileReport.matches
+    const doc = new jsPDF()
+    const pageWidth = doc.internal.pageSize.getWidth()
+    const pageHeight = doc.internal.pageSize.getHeight()
+    const margin = 14
+    const lineHeight = 7
+    let y = 18
+
+    const addFooter = () => {
+      const pageCount = doc.getNumberOfPages()
+      for (let page = 1; page <= pageCount; page += 1) {
+        doc.setPage(page)
+        doc.setDrawColor(226, 232, 240)
+        doc.line(margin, pageHeight - 14, pageWidth - margin, pageHeight - 14)
+        doc.setFontSize(8)
+        doc.setTextColor(100, 116, 139)
+        doc.text('AfriSentry AML Screening Report', margin, pageHeight - 8)
+        doc.text(`Page ${page} of ${pageCount}`, pageWidth - margin, pageHeight - 8, { align: 'right' })
+      }
+    }
+
+    const ensureSpace = (needed = lineHeight) => {
+      if (y + needed > pageHeight - 18) {
+        doc.addPage()
+        y = 18
+      }
+    }
+
+    const sectionTitle = (title: string) => {
+      ensureSpace(14)
+      y += 6
+      doc.setFillColor(248, 250, 252)
+      doc.setDrawColor(226, 232, 240)
+      doc.roundedRect(margin, y - 5, pageWidth - margin * 2, 10, 2, 2, 'FD')
+      doc.setFontSize(11)
+      doc.setTextColor(15, 23, 42)
+      doc.text(title, margin + 4, y + 2)
+      y += 12
+    }
+
+    try {
+      const logoData = await loadImageDataUrl(logoSrc)
+      doc.addImage(logoData, 'PNG', margin, 12, 36, 14)
+    } catch {
+      doc.setFontSize(14)
+      doc.setTextColor(15, 23, 42)
+      doc.text('AfriSentry', margin, 20)
+    }
+
+    const reportStatus = summary.overall_status ?? (summary.total_matches > 0 ? 'REVIEW' : 'CLEAR')
+    doc.setFillColor(15, 23, 42)
+    doc.roundedRect(pageWidth - 58, 12, 44, 12, 2, 2, 'F')
+    doc.setFontSize(9)
+    doc.setTextColor(255, 255, 255)
+    doc.text(reportStatus, pageWidth - 36, 20, { align: 'center' })
+
+    y = 34
+    doc.setFontSize(18)
+    doc.setTextColor(15, 23, 42)
+    doc.text('Screened Profile Report', margin, y)
+    y += 8
+    doc.setFontSize(11)
+    doc.setTextColor(71, 85, 105)
+    doc.text(`Subject: ${customer.name} (${customer.customer_id})`, margin, y)
+    y += lineHeight
+    doc.text(`Risk: ${customer.risk_level} | Source: ${customer.source_database}`, margin, y)
+    y += lineHeight
+    doc.text(`Generated: ${formatDateTime(summary.screening_date || customer.last_updated || '')}`, margin, y)
+    y += lineHeight
+    doc.text(`Matches Found: ${summary.total_matches} | APIs Checked: ${summary.apis_checked ?? 0} of ${summary.total_api_sources ?? profileReport.api_sources?.length ?? 0}`, margin, y)
+    y += lineHeight
+
+    sectionTitle('Customer Overview')
+    ;[
+      `Email: ${customer.email || '-'}`,
+      `Customer type: ${customer.customer_type || '-'}`,
+      `Risk score: ${customer.risk_score == null ? '-' : customer.risk_score.toFixed(2)}`,
+      `PEP flag: ${customer.is_pep ? 'Yes' : 'No'}`,
+      `Sanctions flag: ${customer.is_sanctioned ? 'Yes' : 'No'}`,
+      `Risk flags: ${(summary.risk_flags ?? []).length ? (summary.risk_flags ?? []).join(', ') : 'None'}`,
+    ].forEach((line) => {
+      ensureSpace(lineHeight)
+      doc.text(line, margin + 2, y)
+      y += lineHeight
+    })
+
+    sectionTitle('API Coverage')
+    doc.setFontSize(11)
+    doc.setTextColor(51, 65, 85)
+    ;(profileReport.api_sources ?? []).forEach((source) => {
+      ensureSpace(lineHeight)
+      doc.text(`${source.name} | ${source.status}${source.last_four ? ` | ending ${source.last_four}` : ''}`, margin + 2, y)
+      y += lineHeight
+    })
+
+    sectionTitle('Matches And Provider Details')
+    doc.setFontSize(11)
+    if (!matches || matches.length === 0) {
+      doc.text('No matches found for this profile.', margin + 2, y)
+    } else {
+      matches.forEach((m, idx) => {
+        ensureSpace(16)
+        const score = m.match_score == null ? '-' : `${(m.match_score * 100).toFixed(1)}%`
+        doc.setFontSize(11)
+        doc.setTextColor(15, 23, 42)
+        doc.text(
+          `${idx + 1}. ${m.watchlist_name || '-'} | ${m.match_type} | ${m.status} | ${score}`,
+          margin + 2,
+          y,
+        )
+        y += lineHeight
+        doc.setFontSize(9)
+        doc.setTextColor(71, 85, 105)
+        detailEntries(m.evidence_data).forEach(([key, value]) => {
+          const wrapped = doc.splitTextToSize(`${labelForDetail(key)}: ${value}`, 178)
+          wrapped.forEach((line: string) => {
+            ensureSpace(lineHeight)
+            doc.text(line, margin + 6, y)
+            y += lineHeight
+          })
+        })
+        y += 3
+      })
+    }
+
+    addFooter()
+    const baseName = customer.customer_id || selectedProfile.customer_id || 'screened_profile'
+    doc.save(`${baseName}_screening_report.pdf`)
+  }
+
+  const handleDownloadReportLegacy = () => {
     if (!profileReport || !selectedProfile) return
 
     const customer = profileReport.customer
@@ -429,6 +649,8 @@ export const Screening: React.FC<ScreeningProps> = ({ variant = 'screening' }) =
     const summary = profileReport?.summary
     const matches = profileReport?.matches ?? []
     const V = (v?: string | null) => (v && String(v).trim() !== '' ? v : '-')
+    const reportStatus = summary?.overall_status ?? ((summary?.total_matches ?? 0) > 0 ? 'REVIEW' : 'CLEAR')
+    const riskTone = reportStatus === 'BLOCK' || reportStatus === 'REVIEW' ? 'pill-high' : 'pill-low'
 
     return (
       <div className="reports-container">
@@ -478,6 +700,56 @@ export const Screening: React.FC<ScreeningProps> = ({ variant = 'screening' }) =
             )}
           </div>
         </header>
+
+        <div className="customers-filters-card manual-screening-summary-card manual-screening-report-hero">
+          <div className="bulk-import-card manual-screening-report-hero-inner">
+            {profileLoading ? (
+              <div className="manual-screening-empty-state">
+                <span className="view-profile-label">Report Summary</span>
+                <span className="bulk-import-text">Loading screened profile report...</span>
+              </div>
+            ) : customer ? (
+              <>
+                <div className="manual-screening-report-brand">
+                  <img src={logoSrc} alt="AfriSentry Logo" className="manual-screening-report-logo" />
+                  <span className={`pill ${riskTone}`}>{reportStatus}</span>
+                </div>
+                <div className="manual-screening-report-title-block">
+                  <span className="view-profile-label">Screening Report</span>
+                  <h2 className="manual-screening-report-title">{customer.name}</h2>
+                  <p className="manual-screening-report-subtitle">
+                    Generated {formatDateTime(summary?.screening_date || customer.last_updated || '')} for {customer.customer_type.toLowerCase()} screening.
+                  </p>
+                </div>
+                <div className="manual-screening-report-metrics">
+                  <div className="manual-screening-report-metric">
+                    <span>{summary?.total_matches ?? 0}</span>
+                    <small>Matches</small>
+                  </div>
+                  <div className="manual-screening-report-metric">
+                    <span>{summary?.apis_checked ?? 0}/{summary?.total_api_sources ?? profileReport?.api_sources?.length ?? 0}</span>
+                    <small>APIs Checked</small>
+                  </div>
+                  <div className="manual-screening-report-metric">
+                    <span>{summary?.risk_flags?.length ?? 0}</span>
+                    <small>Risk Flags</small>
+                  </div>
+                </div>
+                <div className="view-profile-field view-profile-field-full manual-screening-report-flags">
+                  <span className="view-profile-label">Risk Flags</span>
+                  <span className="view-profile-value view-profile-value-block">
+                    {summary?.risk_flags?.length ? summary.risk_flags.join(', ') : 'None'}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <div className="manual-screening-empty-state">
+                <span className="view-profile-label">Report Summary</span>
+                <span className="bulk-import-text">No report data available.</span>
+              </div>
+            )}
+          </div>
+        </div>
 
         <div className="view-profile-card-outer">
           <div className="view-profile-card-inner">
@@ -541,6 +813,86 @@ export const Screening: React.FC<ScreeningProps> = ({ variant = 'screening' }) =
                       </div>
                     )}
                   </section>
+
+                  <section className="view-profile-section">
+                    <h2 className="view-profile-section-title">4. API Coverage</h2>
+                    <div className="report-content-container ecl-table-container">
+                      <table className="ecl-table">
+                        <thead>
+                          <tr>
+                            <th>API SOURCE</th>
+                            <th>TYPE</th>
+                            <th>STATUS</th>
+                            <th>KEY</th>
+                            <th>USED FOR</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(profileReport?.api_sources ?? []).length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="muted">No screening API keys are configured.</td>
+                            </tr>
+                          ) : (
+                            (profileReport?.api_sources ?? []).map((source) => (
+                              <tr key={source.id}>
+                                <td className="customer-id">{source.name}</td>
+                                <td>{source.type === 'EXTERNAL' ? 'External' : source.type === 'CUSTOM' ? 'Custom' : 'Built-in'}</td>
+                                <td>
+                                  <span className={`pill ${source.status === 'ERROR' ? 'pill-high' : source.status === 'NOT_CONFIGURED' ? 'pill-kyc-pending' : 'pill-low'}`}>
+                                    {source.status === 'SEARCHED'
+                                      ? 'Searched'
+                                      : source.status === 'CONNECTED'
+                                        ? 'Connected'
+                                        : source.status === 'ERROR'
+                                          ? 'Error'
+                                          : 'Not configured'}
+                                  </span>
+                                </td>
+                                <td className="muted">{source.last_four ? `Ending ${source.last_four}` : '-'}</td>
+                                <td className="muted">{source.error || (typeof source.total_hits === 'number' ? `${source.used_for} (${source.total_hits} hits)` : source.used_for)}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+
+                  {matches.length > 0 && (
+                    <section className="view-profile-section">
+                      <h2 className="view-profile-section-title">5. Detailed Match Report</h2>
+                      <div className="manual-screening-detail-list">
+                        {matches.map((match, index) => {
+                          const entries = detailEntries(match.evidence_data)
+                          return (
+                            <article key={`${match.match_id}-${match.source}-detail`} className="manual-screening-detail-card">
+                              <div className="manual-screening-detail-header">
+                                <span className="customer-id">{index + 1}. {match.watchlist_name || 'Unnamed match'}</span>
+                                <span className="pill pill-kyc-pending">{match.source}</span>
+                              </div>
+                              <div className="view-profile-grid">
+                                <div className="view-profile-field"><span className="view-profile-label">Match ID</span><span className="view-profile-value">{match.match_id}</span></div>
+                                <div className="view-profile-field"><span className="view-profile-label">Match Type</span><span className="view-profile-value">{match.match_type}</span></div>
+                                <div className="view-profile-field"><span className="view-profile-label">Status</span><span className="view-profile-value">{match.status}</span></div>
+                                <div className="view-profile-field"><span className="view-profile-label">Score</span><span className="view-profile-value">{match.match_score == null ? '-' : `${(match.match_score * 100).toFixed(1)}%`}</span></div>
+                                {entries.length === 0 ? (
+                                  <div className="view-profile-field view-profile-field-full">
+                                    <span className="view-profile-label">Provider Details</span>
+                                    <span className="view-profile-value view-profile-value-block">No additional details returned.</span>
+                                  </div>
+                                ) : entries.map(([key, value]) => (
+                                  <div key={`${match.match_id}-${key}`} className="view-profile-field view-profile-field-full">
+                                    <span className="view-profile-label">{labelForDetail(key)}</span>
+                                    <span className="view-profile-value view-profile-value-block">{value}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </article>
+                          )
+                        })}
+                      </div>
+                    </section>
+                  )}
                 </>
               ) : (
                 <section className="view-profile-section">

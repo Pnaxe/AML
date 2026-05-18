@@ -28,28 +28,111 @@ import { Configurations } from '../pages/Configurations'
 import { DataManagement } from '../pages/DataManagement'
 import { DataValidation } from '../pages/DataValidation'
 import { ValidatedData } from '../pages/ValidatedData'
+import { Notifications } from '../pages/Notifications'
 import { useAuth } from '../contexts/AuthContext'
+import { fetchJsonWithRetry, isAbortError } from '../contexts/fetchUtils'
 
 type LayoutProps = {
   onLogout?: () => void
 }
 
 const ACTIVE_PAGE_STORAGE_KEY = 'aml_active_page'
+const POST_LOGIN_PAGE_STORAGE_KEY = 'aml_post_login_page'
+const NOTIFICATIONS_LAST_SEEN_STORAGE_KEY = 'aml_notifications_last_seen'
+const DISMISSED_NOTIFICATIONS_STORAGE_KEY = 'aml_notifications_dismissed_ids'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api'
+
+type GenericRecord = Record<string, unknown>
+type Paged<T> = { results?: T[] } | T[]
+
+function rowsOf<T>(payload: Paged<T>): T[] {
+  return Array.isArray(payload) ? payload : payload.results ?? []
+}
+
+function toDate(value: unknown): Date | null {
+  if (typeof value !== 'string' || !value) return null
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
 
 export const Layout: React.FC<LayoutProps> = ({ onLogout }) => {
-  const { username } = useAuth()
+  const { username, token } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarHidden, setSidebarHidden] = useState(false)
+  const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false)
   const [activePage, setActivePage] = useState<AmlPageId>(() => {
     const savedPage = window.localStorage.getItem(ACTIVE_PAGE_STORAGE_KEY)
-    if (!savedPage) return 'dashboard'
-    const matchingPage = AML_SECTIONS.find((section) => section.id === savedPage)
-    return matchingPage?.id ?? 'dashboard'
+    if (savedPage) {
+      const matchingPage = AML_SECTIONS.find((section) => section.id === savedPage)
+      if (matchingPage) {
+        window.sessionStorage.removeItem(POST_LOGIN_PAGE_STORAGE_KEY)
+        return matchingPage.id
+      }
+    }
+
+    const postLoginPage = window.sessionStorage.getItem(POST_LOGIN_PAGE_STORAGE_KEY)
+    if (postLoginPage) {
+      window.sessionStorage.removeItem(POST_LOGIN_PAGE_STORAGE_KEY)
+      const matchingPostLoginPage = AML_SECTIONS.find((section) => section.id === postLoginPage)
+      return matchingPostLoginPage?.id ?? 'dashboard'
+    }
+
+    return 'dashboard'
   })
   const [correctionDataset, setCorrectionDataset] = useState<string | null>(null)
 
   React.useEffect(() => {
     window.localStorage.setItem(ACTIVE_PAGE_STORAGE_KEY, activePage)
+  }, [activePage])
+
+  const refreshUnreadNotifications = React.useCallback(async () => {
+    const controller = new AbortController()
+    try {
+      const headers: Record<string, string> = {}
+      if (token) headers.Authorization = `Token ${token}`
+
+      const payload = await fetchJsonWithRetry<Paged<GenericRecord>>(
+        `${API_BASE_URL}/alerts/`,
+        { headers, signal: controller.signal }
+      )
+      const alerts = rowsOf(payload)
+      const dismissedRaw = window.localStorage.getItem(DISMISSED_NOTIFICATIONS_STORAGE_KEY)
+      const dismissedIds = new Set<string>(
+        dismissedRaw
+          ? ((JSON.parse(dismissedRaw) as unknown[]).map((item) => String(item)))
+          : []
+      )
+
+      const lastSeenRaw = window.localStorage.getItem(NOTIFICATIONS_LAST_SEEN_STORAGE_KEY)
+      const lastSeenTime = lastSeenRaw ? Date.parse(lastSeenRaw) : 0
+
+      const hasUnread = alerts.some((row) => {
+        const id = String(row.id ?? '')
+        if (dismissedIds.has(id)) return false
+        const notificationTime = toDate(row.triggered_at ?? row.created_at)?.getTime()
+        return typeof notificationTime === 'number' && notificationTime > lastSeenTime
+      })
+      setHasUnreadNotifications(hasUnread)
+    } catch (error) {
+      if (isAbortError(error)) return
+      // Keep existing indicator state if refresh fails.
+    } finally {
+      controller.abort()
+    }
+  }, [token])
+
+  React.useEffect(() => {
+    void refreshUnreadNotifications()
+    const intervalId = window.setInterval(() => {
+      void refreshUnreadNotifications()
+    }, 60000)
+    return () => window.clearInterval(intervalId)
+  }, [refreshUnreadNotifications])
+
+  React.useEffect(() => {
+    if (activePage !== 'notifications') return
+    window.localStorage.setItem(NOTIFICATIONS_LAST_SEEN_STORAGE_KEY, new Date().toISOString())
+    setHasUnreadNotifications(false)
   }, [activePage])
 
   const activeLabel = AML_SECTIONS.find((s) => s.id === activePage)?.label ?? ''
@@ -73,6 +156,17 @@ export const Layout: React.FC<LayoutProps> = ({ onLogout }) => {
     if (activePage === 'transactions') return <Transactions />
     if (activePage === 'transactions-upload') return <TransactionsUpload />
     if (activePage === 'transactions-upload-data') return <TransactionsUploadData />
+    if (activePage === 'notifications') {
+      return (
+        <Notifications
+          onClose={() => setActivePage('dashboard')}
+          onOpenSettings={() => setActivePage('configurations-email')}
+          onNotificationsChange={() => {
+            void refreshUnreadNotifications()
+          }}
+        />
+      )
+    }
     if (activePage === 'alerts') return <Alerts />
     if (activePage === 'cases') return <Cases />
     if (activePage === 'sar') return <SAR />
@@ -121,7 +215,10 @@ export const Layout: React.FC<LayoutProps> = ({ onLogout }) => {
           activeSectionLabel={activeLabel}
           onSidebarToggle={() => setSidebarHidden((prev) => !prev)}
           isSidebarHidden={sidebarHidden}
+          hasUnreadNotifications={hasUnreadNotifications}
+          animateNotificationBell={hasUnreadNotifications && activePage !== 'notifications'}
           userInitials={userInitials}
+          onNotificationsClick={() => setActivePage('notifications')}
           onLogout={onLogout}
         />
         <div className="main-content-scrollable">{renderContent()}</div>

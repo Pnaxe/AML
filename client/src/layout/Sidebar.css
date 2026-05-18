@@ -32,6 +32,17 @@
   min-width: 0;
 }
 
+.sidebar-mobile-close {
+  display: none;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 8px 0 0;
+}
+
 .logo-wrap .logo-img {
   display: block;
   width: auto;
@@ -160,6 +171,7 @@
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
   z-index: 999;
+  display: none;
 }
 
 @media (max-width: 1023px) {
@@ -173,7 +185,18 @@
   }
 
   .dashboard-container.menu-open .sidebar.sidebar-open {
-    left: 0;
+    left: 64px;
+    width: min(var(--sidebar-width), calc(100vw - 64px));
+  }
+
+  .sidebar-backdrop {
+    display: block;
+  }
+
+  .sidebar-mobile-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 }
 

@@ -8,6 +8,8 @@ type TopNavBarProps = {
   activeSectionLabel: string
   onSidebarToggle: () => void
   isSidebarHidden: boolean
+  hasUnreadNotifications: boolean
+  animateNotificationBell?: boolean
   userInitials: string
   onLogout?: () => void
   onNotificationsClick?: () => void
@@ -18,6 +20,8 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
   activeSectionLabel,
   onSidebarToggle,
   isSidebarHidden,
+  hasUnreadNotifications,
+  animateNotificationBell = false,
   userInitials,
   onLogout,
   onNotificationsClick,
@@ -60,11 +64,11 @@ export const TopNavBar: React.FC<TopNavBarProps> = ({
         </button>
         <button
           type="button"
-          className="icon-button"
+          className={`icon-button ${animateNotificationBell ? 'notification-bell-shake' : ''}`}
           aria-label="Notifications"
           onClick={onNotificationsClick}
         >
-          <span className="notification-dot" />
+          {hasUnreadNotifications && <span className="notification-dot" />}
           <HiOutlineBell size={20} className="notification-icon" />
         </button>
         <div className="top-nav-user-menu" ref={userMenuRef}>

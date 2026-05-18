@@ -24,6 +24,12 @@ type DatasetTable = {
   rows: Array<Record<string, string>>
 }
 
+type DatasetFile = {
+  dataset_file: string
+  size_bytes: number
+  uploaded_at: string
+}
+
 type ValidatedDataProps = {
   selectedDataset?: string | null
 }
@@ -55,8 +61,9 @@ function buildDatasetTables(
   transactions: GenericRecord[],
   customers: GenericRecord[],
   alerts: GenericRecord[],
+  uploadedDatasets: DatasetFile[],
 ): Record<string, DatasetTable> {
-  return {
+  const baseTables: Record<string, DatasetTable> = {
     'Transactions Database': {
       columns: ['transaction_id', 'amount', 'currency', 'status', 'transaction_date'],
       rows: transactions.slice(0, 25).map((row) => ({
@@ -86,6 +93,22 @@ function buildDatasetTables(
       })),
     },
   }
+
+  uploadedDatasets.forEach((dataset) => {
+    baseTables[dataset.dataset_file] = {
+      columns: ['dataset_file', 'size_bytes', 'uploaded_at', 'source'],
+      rows: [
+        {
+          dataset_file: dataset.dataset_file,
+          size_bytes: String(dataset.size_bytes),
+          uploaded_at: fmtDate(dataset.uploaded_at),
+          source: 'Data Upload',
+        },
+      ],
+    }
+  })
+
+  return baseTables
 }
 
 function buildCorrectionRows(
@@ -225,39 +248,44 @@ export const ValidatedData: React.FC<ValidatedDataProps> = ({ selectedDataset })
   useEffect(() => {
     const loadCorrections = async () => {
       const cachedValue = sessionStorage.getItem(VALIDATED_DATA_CACHE_KEY)
-      setLoading(true)
+      let hasCachedData = false
       if (cachedValue) {
         try {
           const parsed = JSON.parse(cachedValue) as { rows: CorrectionRow[]; datasetTables: Record<string, DatasetTable> }
           setRows(parsed.rows)
           setDatasetTables(parsed.datasetTables)
+          hasCachedData = true
         } catch {
           sessionStorage.removeItem(VALIDATED_DATA_CACHE_KEY)
         }
       }
+      setLoading(!hasCachedData)
       setError(null)
       try {
-        const [transactionsRes, customersRes, alertsRes] = await Promise.all([
+        const [transactionsRes, customersRes, alertsRes, uploadedDatasetsRes] = await Promise.all([
           fetch(`${API_BASE_URL}/transactions/`, { headers: authHeaders }),
           fetch(`${API_BASE_URL}/customers/`, { headers: authHeaders }),
           fetch(`${API_BASE_URL}/alerts/`, { headers: authHeaders }),
+          fetch(`${API_BASE_URL}/ml-models/datasets/`, { headers: authHeaders }),
         ])
 
-        if (!transactionsRes.ok || !customersRes.ok || !alertsRes.ok) {
+        if (!transactionsRes.ok || !customersRes.ok || !alertsRes.ok || !uploadedDatasetsRes.ok) {
           throw new Error('Failed to load correction datasets')
         }
 
-        const [transactionsPayload, customersPayload, alertsPayload] = await Promise.all([
+        const [transactionsPayload, customersPayload, alertsPayload, uploadedDatasetsPayload] = await Promise.all([
           transactionsRes.json(),
           customersRes.json(),
           alertsRes.json(),
+          uploadedDatasetsRes.json(),
         ])
 
         const transactions = rowsOf<GenericRecord>(transactionsPayload)
         const customers = rowsOf<GenericRecord>(customersPayload)
         const alerts = rowsOf<GenericRecord>(alertsPayload)
+        const uploadedDatasets = rowsOf<DatasetFile>(uploadedDatasetsPayload)
 
-        const nextDatasetTables = buildDatasetTables(transactions, customers, alerts)
+        const nextDatasetTables = buildDatasetTables(transactions, customers, alerts, uploadedDatasets)
         const nextRows = buildCorrectionRows(transactions, customers, alerts)
         setDatasetTables(nextDatasetTables)
         setRows(nextRows)
@@ -279,7 +307,7 @@ export const ValidatedData: React.FC<ValidatedDataProps> = ({ selectedDataset })
     void loadCorrections()
   }, [])
 
-  const datasets = useMemo(() => Array.from(new Set(rows.map((r) => r.dataset))), [rows])
+  const datasets = useMemo(() => Object.keys(datasetTables), [datasetTables])
 
   useEffect(() => {
     if (selectedDataset) {

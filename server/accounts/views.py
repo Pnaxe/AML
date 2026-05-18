@@ -1,4 +1,5 @@
 from rest_framework import viewsets, filters, status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -42,6 +43,13 @@ class CustomerViewSet(viewsets.ModelViewSet):
     ]
     ordering_fields = ['created_at', 'risk_score']
     ordering = ['-created_at']
+    
+    class CustomerPagination(PageNumberPagination):
+        page_size = 25
+        page_size_query_param = 'page_size'
+        max_page_size = 100
+
+    pagination_class = CustomerPagination
     
     def get_serializer_class(self):
         if self.action == 'create':

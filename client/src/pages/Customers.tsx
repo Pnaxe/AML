@@ -1,50 +1,154 @@
-import React, { useMemo, useState } from 'react'
-import { HiOutlineSearch, HiOutlineX, HiOutlineEye, HiOutlinePencil, HiOutlineTrash, HiOutlineUpload, HiOutlineDownload, HiOutlineUserAdd, HiOutlineArrowLeft } from 'react-icons/hi'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  HiOutlineArrowLeft,
+  HiOutlineDownload,
+  HiOutlineEye,
+  HiOutlinePencil,
+  HiOutlineSearch,
+  HiOutlineTrash,
+  HiOutlineUpload,
+  HiOutlineUserAdd,
+  HiOutlineX,
+} from 'react-icons/hi'
 import { useToast } from '../contexts/ToastContext'
+import { useAuth } from '../contexts/AuthContext'
 import './Customers.css'
 
-const MOCK_CUSTOMERS = [
-  {
-    id: 'CUST-001234',
-    name: 'Acme Trading Ltd',
-    email: 'xavwe@mailinator.com',
-    risk: 'Low',
-    kycStatus: 'Verified',
-    lastActivity: '11/21/2025',
-  },
-  {
-    id: 'CUST-001235',
-    name: 'Green Valley Foods',
-    risk: 'Medium',
-    kycStatus: 'Verified',
-    email: 'contact@greenvalleyfoods.com',
-    lastActivity: '11/21/2025',
-  },
-  {
-    id: 'CUST-001236',
-    name: 'Sunrise Remittances',
-    risk: 'High',
-    kycStatus: 'Verified',
-    email: 'contact@sunriseremittances.com',
-    lastActivity: '11/21/2025',
-  },
-  {
-    id: 'CUST-001237',
-    name: 'Nova Retail Bank',
-    risk: 'Low',
-    kycStatus: 'Verified',
-    email: 'contact@novaretailbank.com',
-    lastActivity: '11/21/2025',
-  },
-]
-
 const PAGE_SIZE = 25
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api'
 
-type Customer = (typeof MOCK_CUSTOMERS)[number]
+type RiskLevel = 'Low' | 'Medium' | 'High' | 'Critical'
+type KycStatus = 'Verified' | 'Pending'
+type ProfileType = 'Individual' | 'Business'
+
+type BackendCustomer = {
+  id: number
+  customer_id: string
+  customer_type: 'INDIVIDUAL' | 'CORPORATE' | 'GOVERNMENT' | 'NON_PROFIT'
+  first_name: string
+  last_name: string
+  company_name: string
+  email: string
+  country: string
+  risk_level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+  kyc_verified: boolean
+  updated_at: string
+  created_at: string
+}
+
+type PaginatedResponse<T> = {
+  count?: number
+  next?: string | null
+  previous?: string | null
+  results?: T[]
+} | T[]
+
+type Customer = {
+  id: number
+  displayId: string
+  name: string
+  email: string
+  risk: RiskLevel
+  kycStatus: KycStatus
+  lastActivity: string
+  profileType: ProfileType
+  raw: BackendCustomer
+}
+
+function rowsOf<T>(payload: PaginatedResponse<T>): T[] {
+  return Array.isArray(payload) ? payload : payload.results ?? []
+}
+
+function totalCountOf<T>(payload: PaginatedResponse<T>): number {
+  if (Array.isArray(payload)) return payload.length
+  return typeof payload.count === 'number' ? payload.count : (payload.results ?? []).length
+}
+
+function formatDate(value: string): string {
+  if (!value) return '-'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleDateString('en-US')
+}
+
+function toRiskLevel(value: BackendCustomer['risk_level']): RiskLevel {
+  if (value === 'CRITICAL') return 'Critical'
+  if (value === 'HIGH') return 'High'
+  if (value === 'MEDIUM') return 'Medium'
+  return 'Low'
+}
+
+function toCustomer(row: BackendCustomer): Customer {
+  const name =
+    row.customer_type === 'INDIVIDUAL'
+      ? `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim() || row.customer_id
+      : row.company_name || row.customer_id
+
+  return {
+    id: row.id,
+    displayId: row.customer_id,
+    name,
+    email: row.email || '-',
+    risk: toRiskLevel(row.risk_level),
+    kycStatus: row.kyc_verified ? 'Verified' : 'Pending',
+    lastActivity: formatDate(row.updated_at || row.created_at),
+    profileType: row.customer_type === 'INDIVIDUAL' ? 'Individual' : 'Business',
+    raw: row,
+  }
+}
+
+function normalizeRiskForApi(risk: RiskLevel): BackendCustomer['risk_level'] {
+  if (risk === 'Critical') return 'CRITICAL'
+  if (risk === 'High') return 'HIGH'
+  if (risk === 'Medium') return 'MEDIUM'
+  return 'LOW'
+}
+
+function csvEscape(value: string): string {
+  if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+    return `"${value.replace(/"/g, '""')}"`
+  }
+  return value
+}
+
+function parseCsvLine(line: string): string[] {
+  const values: string[] = []
+  let current = ''
+  let inQuotes = false
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]
+    const nextChar = line[index + 1]
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        current += '"'
+        index += 1
+      } else {
+        inQuotes = !inQuotes
+      }
+      continue
+    }
+
+    if (char === ',' && !inQuotes) {
+      values.push(current.trim())
+      current = ''
+      continue
+    }
+
+    current += char
+  }
+
+  values.push(current.trim())
+  return values
+}
 
 export const Customers: React.FC = () => {
   const { showToast } = useToast()
-  const [customers, setCustomers] = useState<Customer[]>(MOCK_CUSTOMERS)
+  const { token } = useAuth()
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [totalCustomers, setTotalCustomers] = useState(0)
+  const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [activeSearchTerm, setActiveSearchTerm] = useState('')
   const [kycFilter, setKycFilter] = useState('')
@@ -56,51 +160,67 @@ export const Customers: React.FC = () => {
   const [deleteCustomer, setDeleteCustomer] = useState<Customer | null>(null)
   const [newName, setNewName] = useState('')
   const [newEmail, setNewEmail] = useState('')
-  const [newRisk, setNewRisk] = useState<Customer['risk']>('Low')
-  const [newKycStatus, setNewKycStatus] = useState<Customer['kycStatus']>('Verified')
+  const [newRisk, setNewRisk] = useState<RiskLevel>('Low')
+  const [newKycStatus, setNewKycStatus] = useState<KycStatus>('Pending')
+  const [newProfileType, setNewProfileType] = useState<ProfileType>('Business')
   const [editName, setEditName] = useState('')
   const [editEmail, setEditEmail] = useState('')
-  const [editRisk, setEditRisk] = useState<Customer['risk']>('Low')
-  const [editKycStatus, setEditKycStatus] = useState<Customer['kycStatus']>('Verified')
+  const [editRisk, setEditRisk] = useState<RiskLevel>('Low')
+  const [editKycStatus, setEditKycStatus] = useState<KycStatus>('Pending')
   const [showBulkImport, setShowBulkImport] = useState(false)
   const [bulkImportFormat, setBulkImportFormat] = useState<'csv' | 'excel'>('csv')
   const [showExportModal, setShowExportModal] = useState(false)
   const [exportFormat, setExportFormat] = useState<'csv' | 'excel'>('csv')
   const [exportFileName, setExportFileName] = useState('customers_export')
 
-  const filteredCustomers = useMemo(
-    () =>
-      customers.filter((cust) => {
-        const term = activeSearchTerm.toLowerCase()
-        if (
-          term &&
-          !(
-            cust.name.toLowerCase().includes(term) ||
-            cust.id.toLowerCase().includes(term) ||
-            cust.email.toLowerCase().includes(term)
-          )
-        ) {
-          return false
-        }
-        if (kycFilter && cust.kycStatus.toLowerCase() !== kycFilter.toLowerCase()) {
-          return false
-        }
-        if (riskFilter && cust.risk.toLowerCase() !== riskFilter.toLowerCase()) {
-          return false
-        }
-        return true
-      }),
-    [customers, activeSearchTerm, kycFilter, riskFilter]
-  )
+  const authHeaders = useMemo(() => {
+    const headers: Record<string, string> = {}
+    if (token) headers.Authorization = `Token ${token}`
+    return headers
+  }, [token])
 
-  const totalCustomers = filteredCustomers.length
+  const loadCustomers = React.useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const params = new URLSearchParams({
+        page: String(currentPage),
+        page_size: String(PAGE_SIZE),
+      })
+      if (activeSearchTerm) params.set('search', activeSearchTerm)
+      if (kycFilter) params.set('kyc_verified', String(kycFilter === 'Verified'))
+      if (riskFilter) params.set('risk_level', normalizeRiskForApi(riskFilter as RiskLevel))
+
+      const response = await fetch(`${API_BASE_URL}/customers/?${params.toString()}`, { headers: authHeaders })
+      if (!response.ok) throw new Error('Failed to load customers')
+      const payload = (await response.json()) as PaginatedResponse<BackendCustomer>
+      setCustomers(rowsOf(payload).map(toCustomer))
+      setTotalCustomers(totalCountOf(payload))
+    } catch (error) {
+      console.error(error)
+      showToast('Unable to load customers.')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [activeSearchTerm, authHeaders, currentPage, kycFilter, riskFilter, showToast])
+
+  useEffect(() => {
+    void loadCustomers()
+  }, [loadCustomers])
+
   const totalPages = Math.max(1, Math.ceil(totalCustomers / PAGE_SIZE))
   const safePage = Math.min(currentPage, totalPages)
-  const startIndex = (safePage - 1) * PAGE_SIZE
-  const pageCustomers = filteredCustomers.slice(startIndex, startIndex + PAGE_SIZE)
+  const pageCustomers = customers
+  const displayStart = totalCustomers === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1
+  const displayEnd = displayStart === 0 ? 0 : displayStart + pageCustomers.length - 1
 
-  const displayStart = totalCustomers === 0 ? 0 : startIndex + 1
-  const displayEnd = startIndex + pageCustomers.length
+  const resetAddForm = () => {
+    setShowAddModal(false)
+    setNewName('')
+    setNewEmail('')
+    setNewRisk('Low')
+    setNewKycStatus('Pending')
+    setNewProfileType('Business')
+  }
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -114,93 +234,134 @@ export const Customers: React.FC = () => {
     setCurrentPage(1)
   }
 
-  const handleOpenAddModal = () => {
-    setShowAddModal(true)
-  }
-
-  const handleOpenViewModal = (cust: Customer) => setViewCustomer(cust)
-  const handleCloseViewModal = () => setViewCustomer(null)
-
   const handleOpenEditModal = (cust: Customer) => {
     setEditCustomer(cust)
     setEditName(cust.name)
-    setEditEmail(cust.email)
+    setEditEmail(cust.email === '-' ? '' : cust.email)
     setEditRisk(cust.risk)
     setEditKycStatus(cust.kycStatus)
   }
+
   const handleCloseEditModal = () => {
     setEditCustomer(null)
     setEditName('')
     setEditEmail('')
     setEditRisk('Low')
-    setEditKycStatus('Verified')
+    setEditKycStatus('Pending')
   }
 
-  const handleOpenDeleteModal = (cust: Customer) => setDeleteCustomer(cust)
-  const handleCloseDeleteModal = () => setDeleteCustomer(null)
-
-  const handleCloseAddModal = () => {
-    setShowAddModal(false)
-    setNewName('')
-    setNewEmail('')
-    setNewRisk('Low')
-    setNewKycStatus('Verified')
+  const submitKycStatus = async (customerId: number, status: KycStatus) => {
+    if (status !== 'Verified') return
+    await fetch(`${API_BASE_URL}/customers/${customerId}/accept/`, {
+      method: 'POST',
+      headers: authHeaders,
+    })
   }
 
-  const handleCreateCustomer = (e: React.FormEvent) => {
+  const handleCreateCustomer = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newName.trim() || !newEmail.trim()) {
-      return
+    if (!newName.trim()) return
+
+    const body =
+      newProfileType === 'Individual'
+        ? {
+            customer_type: 'INDIVIDUAL',
+            first_name: newName.trim().split(/\s+/).slice(0, -1).join(' ') || newName.trim(),
+            last_name: newName.trim().split(/\s+/).slice(-1).join(' '),
+            email: newEmail.trim(),
+            risk_level: normalizeRiskForApi(newRisk),
+          }
+        : {
+            customer_type: 'CORPORATE',
+            company_name: newName.trim(),
+            email: newEmail.trim(),
+            risk_level: normalizeRiskForApi(newRisk),
+          }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/customers/`, {
+        method: 'POST',
+        headers: {
+          ...authHeaders,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      })
+      if (!response.ok) throw new Error('Failed to create customer')
+      const created = (await response.json()) as BackendCustomer
+      await submitKycStatus(created.id, newKycStatus)
+      await loadCustomers()
+      setCurrentPage(1)
+      resetAddForm()
+      showToast(`Customer "${newName.trim()}" added successfully.`)
+    } catch (error) {
+      console.error(error)
+      showToast('Unable to create customer.')
     }
-
-    const nextIndex = customers.length + 1
-    const newId = `CUST-${(1234 + nextIndex).toString().padStart(6, '0')}`
-
-    const today = new Date()
-    const lastActivity = today.toLocaleDateString('en-US')
-
-    const newCustomer: Customer = {
-      id: newId,
-      name: newName.trim(),
-      email: newEmail.trim(),
-      risk: newRisk,
-      kycStatus: newKycStatus,
-      lastActivity,
-    }
-
-    setCustomers((prev) => [newCustomer, ...prev])
-    setCurrentPage(1)
-    handleCloseAddModal()
-    showToast(`Customer "${newCustomer.name}" added successfully.`)
   }
 
-  const handleUpdateCustomer = (e: React.FormEvent) => {
+  const handleUpdateCustomer = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!editCustomer || !editName.trim() || !editEmail.trim()) return
-    const today = new Date().toLocaleDateString('en-US')
-    setCustomers((prev) =>
-      prev.map((c) =>
-        c.id === editCustomer.id
-          ? { ...c, name: editName.trim(), email: editEmail.trim(), risk: editRisk, kycStatus: editKycStatus, lastActivity: today }
-          : c
-      )
-    )
-    handleCloseEditModal()
-    showToast(`Customer "${editName.trim()}" updated successfully.`)
+    if (!editCustomer || !editName.trim()) return
+
+    const body =
+      editCustomer.profileType === 'Individual'
+        ? {
+            first_name: editName.trim().split(/\s+/).slice(0, -1).join(' ') || editName.trim(),
+            last_name: editName.trim().split(/\s+/).slice(-1).join(' '),
+            email: editEmail.trim(),
+            risk_level: normalizeRiskForApi(editRisk),
+          }
+        : {
+            company_name: editName.trim(),
+            email: editEmail.trim(),
+            risk_level: normalizeRiskForApi(editRisk),
+          }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/customers/${editCustomer.id}/`, {
+        method: 'PATCH',
+        headers: {
+          ...authHeaders,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      })
+      if (!response.ok) throw new Error('Failed to update customer')
+      if (editKycStatus === 'Verified' && editCustomer.kycStatus !== 'Verified') {
+        await submitKycStatus(editCustomer.id, editKycStatus)
+      }
+      await loadCustomers()
+      handleCloseEditModal()
+      showToast(`Customer "${editName.trim()}" updated successfully.`)
+    } catch (error) {
+      console.error(error)
+      showToast('Unable to update customer.')
+    }
   }
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!deleteCustomer) return
-    const name = deleteCustomer.name
-    setCustomers((prev) => prev.filter((c) => c.id !== deleteCustomer.id))
-    handleCloseDeleteModal()
-    setCurrentPage(1)
-    showToast(`Customer "${name}" deleted successfully.`)
+    try {
+      const response = await fetch(`${API_BASE_URL}/customers/${deleteCustomer.id}/`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      })
+      if (!response.ok && response.status !== 204) throw new Error('Failed to delete customer')
+      const name = deleteCustomer.name
+      setDeleteCustomer(null)
+      await loadCustomers()
+      setCurrentPage(1)
+      showToast(`Customer "${name}" deleted successfully.`)
+    } catch (error) {
+      console.error(error)
+      showToast('Unable to delete customer.')
+    }
   }
 
   const handleDownloadBulkTemplate = () => {
-    const header = ['Customer ID', 'Name', 'Email', 'Risk Level', 'KYC Status'].join(',')
-    const sample = ['CUST-001999', 'Example Customer Ltd', 'customer@example.com', 'Low', 'Verified'].join(',')
+    const header = ['Customer ID', 'Name', 'Email', 'Risk Level', 'KYC Status', 'Profile Type'].join(',')
+    const sample = ['CUST-001999', 'Example Customer Ltd', 'customer@example.com', 'Low', 'Verified', 'Business'].join(',')
     const csvContent = `${header}\n${sample}\n`
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
@@ -216,23 +377,21 @@ export const Customers: React.FC = () => {
   const handleDownloadCustomersExport = () => {
     const safeBaseName = exportFileName.trim() || 'customers_export'
     const header = ['Customer ID', 'Name', 'Email', 'Risk Level', 'KYC Status', 'Last Activity'].join(',')
-    const rows = customers.map((c) =>
+    const rows = pageCustomers.map((c) =>
       [
-        c.id,
-        c.name,
-        c.email,
+        c.displayId,
+        csvEscape(c.name),
+        csvEscape(c.email),
         c.risk,
         c.kycStatus,
         c.lastActivity,
-      ].join(',')
+      ].join(','),
     )
     const csvContent = `${header}\n${rows.join('\n')}\n`
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    // We currently generate a CSV file; Excel can open CSV directly.
-    // Always use .csv extension to avoid invalid .xlsx errors.
     link.download = `${safeBaseName}.csv`
     document.body.appendChild(link)
     link.click()
@@ -241,25 +400,82 @@ export const Customers: React.FC = () => {
     setShowExportModal(false)
   }
 
+  const handleBulkFilePicked = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    if (bulkImportFormat === 'excel') {
+      showToast('Excel import is not available from this screen yet. Use CSV.')
+      return
+    }
+
+    try {
+      const content = await file.text()
+      const lines = content.split(/\r?\n/).filter((line) => line.trim())
+      if (lines.length <= 1) throw new Error('No data rows found')
+
+      const rows = lines.slice(1).map((line) => parseCsvLine(line))
+      let imported = 0
+
+      for (const row of rows) {
+        const [, name = '', email = '', risk = 'Low', kycStatus = 'Pending', profileType = 'Business'] = row
+        if (!name.trim()) continue
+        const body =
+          profileType.toLowerCase() === 'individual'
+            ? {
+                customer_type: 'INDIVIDUAL',
+                first_name: name.trim().split(/\s+/).slice(0, -1).join(' ') || name.trim(),
+                last_name: name.trim().split(/\s+/).slice(-1).join(' '),
+                email: email.trim(),
+                risk_level: normalizeRiskForApi((risk || 'Low') as RiskLevel),
+              }
+            : {
+                customer_type: 'CORPORATE',
+                company_name: name.trim(),
+                email: email.trim(),
+                risk_level: normalizeRiskForApi((risk || 'Low') as RiskLevel),
+              }
+
+        const response = await fetch(`${API_BASE_URL}/customers/`, {
+          method: 'POST',
+          headers: {
+            ...authHeaders,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        })
+
+        if (!response.ok) continue
+        const created = (await response.json()) as BackendCustomer
+        if ((kycStatus || '').toLowerCase() === 'verified') {
+          await submitKycStatus(created.id, 'Verified')
+        }
+        imported += 1
+      }
+
+      await loadCustomers()
+      showToast(imported > 0 ? `${imported} customers imported.` : 'No customers were imported.')
+    } catch (error) {
+      console.error(error)
+      showToast('Unable to import customers from that file.')
+    }
+  }
+
   return (
     <div className="reports-container">
-      {/* Page title + primary action on main background */}
       <header className="customers-header">
         <div>
           <h1 className="customers-title">{showBulkImport ? 'Bulk Import Customers' : 'Customers'}</h1>
           <p className="customers-subtitle">
             {showBulkImport
               ? 'Upload and validate existing customers in bulk.'
-              : 'Customer Management &amp; KYC Verification.'}
+              : 'Customer Management & KYC Verification.'}
           </p>
         </div>
         <div className="customers-header-actions">
           {showBulkImport ? (
-            <button
-              type="button"
-              className="btn-secondary-action btn-with-icon"
-              onClick={() => setShowBulkImport(false)}
-            >
+            <button type="button" className="btn-secondary-action btn-with-icon" onClick={() => setShowBulkImport(false)}>
               <HiOutlineArrowLeft size={16} aria-hidden />
               <span>Back to customers</span>
             </button>
@@ -276,17 +492,11 @@ export const Customers: React.FC = () => {
                 <HiOutlineDownload size={16} aria-hidden />
                 <span>Export</span>
               </button>
-              <button
-                className="btn-import-action btn-with-icon"
-                type="button"
-                onClick={() => {
-                  setShowBulkImport(true)
-                }}
-              >
+              <button className="btn-import-action btn-with-icon" type="button" onClick={() => setShowBulkImport(true)}>
                 <HiOutlineUpload size={16} aria-hidden />
                 <span>Bulk Import</span>
               </button>
-              <button className="btn-primary-action btn-with-icon" onClick={handleOpenAddModal}>
+              <button className="btn-primary-action btn-with-icon" onClick={() => setShowAddModal(true)}>
                 <HiOutlineUserAdd size={16} aria-hidden />
                 <span>Add Existing Customer</span>
               </button>
@@ -294,8 +504,6 @@ export const Customers: React.FC = () => {
           )}
         </div>
       </header>
-
-      {/* Bulk Import page (shares container/card style with KYC) */}
       {showBulkImport ? (
         <div className="customers-container">
           <div className="customers-table-card-outer bulk-import-card">
@@ -303,8 +511,7 @@ export const Customers: React.FC = () => {
               <div className="bulk-import-intro">
                 <h2 className="bulk-import-title">Import existing customers from CSV</h2>
                 <p className="bulk-import-text">
-                  Upload a CSV file with your existing customers to quickly populate the Customers table.
-                  Use the template to ensure column names and formats are correct.
+                  Upload a CSV file and this page will create customer records through the backend API.
                 </p>
               </div>
               <div className="bulk-import-layout">
@@ -334,36 +541,34 @@ export const Customers: React.FC = () => {
                     </div>
                     <p className="bulk-import-drop-main">Drop your {bulkImportFormat === 'csv' ? 'CSV' : 'Excel'} file here</p>
                     <p className="bulk-import-drop-sub">or click to browse from your computer</p>
-                    <button
-                      type="button"
-                      className="btn-primary-action"
-                    >
+                    <button type="button" className="btn-primary-action" onClick={() => fileInputRef.current?.click()}>
                       Choose file
                     </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept={bulkImportFormat === 'csv' ? '.csv' : '.xlsx,.xls'}
+                      style={{ display: 'none' }}
+                      onChange={handleBulkFilePicked}
+                    />
                   </div>
                   <p className="bulk-import-hint">
-                    Supported formats: <strong>.csv</strong> and <strong>.xlsx</strong>. Max 10,000 rows per upload.
+                    Supported here: <strong>.csv</strong>. Excel selection stays visible but is not processed yet.
                   </p>
                 </div>
                 <div className="bulk-import-sidebar">
-                  <h3 className="bulk-import-sidebar-title">Template &amp; mapping</h3>
+                  <h3 className="bulk-import-sidebar-title">Template & mapping</h3>
                   <p className="bulk-import-text">
-                    Start by downloading a sample CSV template with the recommended columns:
-                    <strong> Customer ID</strong>, <strong>Name</strong>, <strong>Email</strong>,{' '}
-                    <strong>Risk Level</strong>, and <strong>KYC Status</strong>.
+                    Start by downloading the sample template. The importer reads name, email, risk level, KYC status, and profile type.
                   </p>
-                  <button
-                    type="button"
-                    className="btn-outline-action btn-with-icon"
-                    onClick={handleDownloadBulkTemplate}
-                  >
+                  <button type="button" className="btn-outline-action btn-with-icon" onClick={handleDownloadBulkTemplate}>
                     <HiOutlineDownload size={16} aria-hidden />
                     <span>Download template</span>
                   </button>
                   <ul className="bulk-import-list">
-                    <li>Risk Level: one of Low, Medium, High.</li>
-                    <li>KYC Status: one of Verified, Pending, Failed.</li>
-                    <li>Emails must be valid email addresses.</li>
+                    <li>Risk Level: Low, Medium, High, or Critical.</li>
+                    <li>KYC Status: Verified or Pending.</li>
+                    <li>Profile Type: Business or Individual.</li>
                   </ul>
                 </div>
               </div>
@@ -371,13 +576,9 @@ export const Customers: React.FC = () => {
           </div>
         </div>
       ) : (
-        /* Filters + table containers with spacing below header */
         <div className="customers-container">
-
-          {/* Filters container */}
           <div className="customers-filters-card report-filters">
             <div className="report-filters-left">
-              {/* Search */}
               <form onSubmit={handleSearchSubmit} className="filter-group filter-group-search">
                 <div className="search-input-wrapper">
                   <span className="search-icon" aria-hidden>
@@ -398,35 +599,18 @@ export const Customers: React.FC = () => {
                 </div>
               </form>
 
-              {/* KYC filter */}
               <div className="filter-group">
                 <span className="filter-label">KYC Status:</span>
-                <select
-                  className="filter-input"
-                  value={kycFilter}
-                  onChange={(e) => {
-                    setKycFilter(e.target.value)
-                    setCurrentPage(1)
-                  }}
-                >
+                <select className="filter-input" value={kycFilter} onChange={(e) => { setKycFilter(e.target.value); setCurrentPage(1) }}>
                   <option value="">All</option>
                   <option value="Verified">Verified</option>
                   <option value="Pending">Pending</option>
-                  <option value="Failed">Failed</option>
                 </select>
               </div>
 
-              {/* Risk filter */}
               <div className="filter-group">
                 <span className="filter-label">Risk Level:</span>
-                <select
-                  className="filter-input"
-                  value={riskFilter}
-                  onChange={(e) => {
-                    setRiskFilter(e.target.value)
-                    setCurrentPage(1)
-                  }}
-                >
+                <select className="filter-input" value={riskFilter} onChange={(e) => { setRiskFilter(e.target.value); setCurrentPage(1) }}>
                   <option value="">All Risk Levels</option>
                   <option value="Critical">Critical</option>
                   <option value="High">High</option>
@@ -437,9 +621,16 @@ export const Customers: React.FC = () => {
             </div>
           </div>
 
-          {/* Table container */}
-          <div className="customers-table-card-outer">
-            <div className="report-content-container ecl-table-container">
+      <div className={`customers-table-card-outer ${!isLoading && pageCustomers.length === 0 ? 'table-empty-state' : ''}`}>
+            <div className="report-content-container ecl-table-container table-loading-shell">
+              {isLoading && (
+                <div className="table-loading-overlay" aria-hidden="true">
+                  <div className="table-loading-indicator">
+                    <div className="table-loading-spinner" />
+                    <span className="table-loading-text">Loading customers...</span>
+                  </div>
+                </div>
+              )}
               <table className="ecl-table">
                 <thead>
                   <tr>
@@ -453,55 +644,35 @@ export const Customers: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {pageCustomers.map((cust) => (
-                    <tr key={cust.id}>
-                      <td className="customer-id">{cust.id}</td>
-                      <td>{cust.name}</td>
-                      <td className="muted">{cust.email}</td>
-                      <td>
-                        <span className={`pill pill-${cust.risk.toLowerCase()}`}>{cust.risk.toUpperCase()}</span>
-                      </td>
-                      <td>
-                        <span className={`pill pill-kyc-${cust.kycStatus.toLowerCase()}`}>{cust.kycStatus}</span>
-                      </td>
-                      <td className="muted">{cust.lastActivity}</td>
-                      <td>
-                        <div className="customers-actions">
-                          <HiOutlineEye
-                            size={18}
-                            className="action-icon action-icon-view"
-                            onClick={() => handleOpenViewModal(cust)}
-                            title="View customer"
-                          />
-                          <HiOutlinePencil
-                            size={18}
-                            className="action-icon action-icon-edit"
-                            onClick={() => handleOpenEditModal(cust)}
-                            title="Edit customer"
-                          />
-                          <HiOutlineTrash
-                            size={18}
-                            className="action-icon action-icon-delete"
-                            onClick={() => handleOpenDeleteModal(cust)}
-                            title="Delete customer"
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {/* placeholder rows to keep table height consistent; 7 cells so vertical borders show */}
-                  {Array.from({ length: Math.max(0, PAGE_SIZE - pageCustomers.length) }).map((_, idx) => (
-                    <tr key={`empty-${idx}`}>
-                      {Array.from({ length: 7 }).map((_, cellIdx) => (
-                        <td key={cellIdx}>&nbsp;</td>
+                  {!isLoading && pageCustomers.map((cust) => (
+                        <tr key={cust.id}>
+                          <td className="customer-id">{cust.displayId}</td>
+                          <td>{cust.name}</td>
+                          <td className="muted">{cust.email}</td>
+                          <td>
+                            <span className={`pill pill-${cust.risk.toLowerCase()}`}>{cust.risk.toUpperCase()}</span>
+                          </td>
+                          <td>
+                            <span className={`pill pill-kyc-${cust.kycStatus.toLowerCase()}`}>{cust.kycStatus}</span>
+                          </td>
+                          <td className="muted">{cust.lastActivity}</td>
+                          <td>
+                            <div className="customers-actions">
+                              <HiOutlineEye size={18} className="action-icon action-icon-view" onClick={() => setViewCustomer(cust)} title="View customer" />
+                              <HiOutlinePencil size={18} className="action-icon action-icon-edit" onClick={() => handleOpenEditModal(cust)} title="Edit customer" />
+                              <HiOutlineTrash size={18} className="action-icon action-icon-delete" onClick={() => setDeleteCustomer(cust)} title="Delete customer" />
+                            </div>
+                          </td>
+                        </tr>
                       ))}
-                    </tr>
-                  ))}
+                  {!isLoading &&
+                    Array.from({ length: Math.max(0, PAGE_SIZE - pageCustomers.length) }).map((_, idx) => (
+                      <tr key={`empty-${idx}`}>{Array.from({ length: 7 }).map((__, cellIdx) => <td key={cellIdx}>&nbsp;</td>)}</tr>
+                    ))}
                 </tbody>
               </table>
             </div>
 
-            {/* Pagination footer */}
             <div className="ecl-table-footer">
               <div className="table-footer-left">
                 Showing {displayStart} to {displayEnd} of {totalCustomers} results.
@@ -509,23 +680,11 @@ export const Customers: React.FC = () => {
               <div className="table-footer-right">
                 {totalPages > 1 ? (
                   <div className="pagination-controls">
-                    <button
-                      type="button"
-                      className="pagination-btn"
-                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                      disabled={safePage === 1}
-                    >
+                    <button type="button" className="pagination-btn" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={safePage === 1}>
                       Previous
                     </button>
-                    <span className="pagination-info">
-                      Page {safePage} of {totalPages}
-                    </span>
-                    <button
-                      type="button"
-                      className="pagination-btn"
-                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                      disabled={safePage === totalPages}
-                    >
+                    <span className="pagination-info">Page {safePage} of {totalPages}</span>
+                    <button type="button" className="pagination-btn" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}>
                       Next
                     </button>
                   </div>
@@ -537,7 +696,6 @@ export const Customers: React.FC = () => {
           </div>
         </div>
       )}
-
       {showExportModal && (
         <div className="modal-backdrop" onClick={() => setShowExportModal(false)}>
           <div className="modal-panel modal-panel-sm" onClick={(e) => e.stopPropagation()}>
@@ -552,35 +710,20 @@ export const Customers: React.FC = () => {
                 <div className="modal-field">
                   <span className="modal-label">File format</span>
                   <div className="export-format-toggle">
-                    <button
-                      type="button"
-                      className={`export-format-btn ${exportFormat === 'csv' ? 'is-active' : ''}`}
-                      onClick={() => setExportFormat('csv')}
-                    >
+                    <button type="button" className={`export-format-btn ${exportFormat === 'csv' ? 'is-active' : ''}`} onClick={() => setExportFormat('csv')}>
                       CSV (.csv)
                     </button>
-                    <button
-                      type="button"
-                      className={`export-format-btn ${exportFormat === 'excel' ? 'is-active' : ''}`}
-                      onClick={() => setExportFormat('excel')}
-                    >
+                    <button type="button" className={`export-format-btn ${exportFormat === 'excel' ? 'is-active' : ''}`} onClick={() => setExportFormat('excel')}>
                       Excel (.xlsx)
                     </button>
                   </div>
                 </div>
                 <div className="modal-field">
                   <label className="modal-label" htmlFor="exportFileName">File name</label>
-                  <input
-                    id="exportFileName"
-                    type="text"
-                    className="modal-input"
-                    value={exportFileName}
-                    onChange={(e) => setExportFileName(e.target.value)}
-                    placeholder="customers_export"
-                  />
+                  <input id="exportFileName" type="text" className="modal-input" value={exportFileName} onChange={(e) => setExportFileName(e.target.value)} placeholder="customers_export" />
                 </div>
                 <p className="bulk-import-text">
-                  All customers in the list will be exported with their ID, name, email, risk level, KYC status, and last activity date.
+                  This export is generated from the backend-backed customer list currently loaded in the page.
                 </p>
               </div>
               <div className="modal-footer">
@@ -597,83 +740,52 @@ export const Customers: React.FC = () => {
       )}
 
       {showAddModal && (
-        <div className="modal-backdrop" onClick={handleCloseAddModal}>
-          <div
-            className="modal-panel"
-            onClick={(e) => {
-              e.stopPropagation()
-            }}
-          >
+        <div className="modal-backdrop" onClick={resetAddForm}>
+          <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2 className="modal-title">Add New Customer</h2>
-              <button className="modal-close-btn" onClick={handleCloseAddModal} aria-label="Close">
+              <button className="modal-close-btn" onClick={resetAddForm} aria-label="Close">
                 <HiOutlineX size={18} />
               </button>
             </div>
             <form className="modal-form" onSubmit={handleCreateCustomer}>
               <div className="modal-body">
                 <div className="modal-field">
-                  <label className="modal-label" htmlFor="newCustomerName">
-                    Name
-                  </label>
-                  <input
-                    id="newCustomerName"
-                    type="text"
-                    className="modal-input"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    placeholder="Acme Trading Ltd"
-                    autoFocus
-                  />
+                  <label className="modal-label" htmlFor="newCustomerType">Profile Type</label>
+                  <select id="newCustomerType" className="modal-input" value={newProfileType} onChange={(e) => setNewProfileType(e.target.value as ProfileType)}>
+                    <option value="Business">Business</option>
+                    <option value="Individual">Individual</option>
+                  </select>
                 </div>
                 <div className="modal-field">
-                  <label className="modal-label" htmlFor="newCustomerEmail">
-                    Email
-                  </label>
-                  <input
-                    id="newCustomerEmail"
-                    type="email"
-                    className="modal-input"
-                    value={newEmail}
-                    onChange={(e) => setNewEmail(e.target.value)}
-                    placeholder="compliance@customer.com"
-                  />
+                  <label className="modal-label" htmlFor="newCustomerName">Name</label>
+                  <input id="newCustomerName" type="text" className="modal-input" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Acme Trading Ltd" autoFocus />
+                </div>
+                <div className="modal-field">
+                  <label className="modal-label" htmlFor="newCustomerEmail">Email</label>
+                  <input id="newCustomerEmail" type="email" className="modal-input" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="compliance@customer.com" />
                 </div>
                 <div className="modal-two-column">
                   <div className="modal-field">
-                    <label className="modal-label" htmlFor="newCustomerRisk">
-                      Risk Level
-                    </label>
-                    <select
-                      id="newCustomerRisk"
-                      className="modal-input"
-                      value={newRisk}
-                      onChange={(e) => setNewRisk(e.target.value as Customer['risk'])}
-                    >
+                    <label className="modal-label" htmlFor="newCustomerRisk">Risk Level</label>
+                    <select id="newCustomerRisk" className="modal-input" value={newRisk} onChange={(e) => setNewRisk(e.target.value as RiskLevel)}>
                       <option value="Low">Low</option>
                       <option value="Medium">Medium</option>
                       <option value="High">High</option>
+                      <option value="Critical">Critical</option>
                     </select>
                   </div>
                   <div className="modal-field">
-                    <label className="modal-label" htmlFor="newCustomerKyc">
-                      KYC Status
-                    </label>
-                    <select
-                      id="newCustomerKyc"
-                      className="modal-input"
-                      value={newKycStatus}
-                      onChange={(e) => setNewKycStatus(e.target.value as Customer['kycStatus'])}
-                    >
+                    <label className="modal-label" htmlFor="newCustomerKyc">KYC Status</label>
+                    <select id="newCustomerKyc" className="modal-input" value={newKycStatus} onChange={(e) => setNewKycStatus(e.target.value as KycStatus)}>
                       <option value="Verified">Verified</option>
                       <option value="Pending">Pending</option>
-                      <option value="Failed">Failed</option>
                     </select>
                   </div>
                 </div>
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn-secondary-action" onClick={handleCloseAddModal}>
+                <button type="button" className="btn-secondary-action" onClick={resetAddForm}>
                   Cancel
                 </button>
                 <button type="submit" className="btn-primary-action">
@@ -698,55 +810,31 @@ export const Customers: React.FC = () => {
               <div className="modal-body">
                 <div className="modal-field">
                   <span className="modal-label">Customer ID</span>
-                  <span className="modal-value customer-id">{editCustomer.id}</span>
+                  <span className="modal-value customer-id">{editCustomer.displayId}</span>
                 </div>
                 <div className="modal-field">
                   <label className="modal-label" htmlFor="editCustomerName">Name</label>
-                  <input
-                    id="editCustomerName"
-                    type="text"
-                    className="modal-input"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    placeholder="Acme Trading Ltd"
-                  />
+                  <input id="editCustomerName" type="text" className="modal-input" value={editName} onChange={(e) => setEditName(e.target.value)} />
                 </div>
                 <div className="modal-field">
                   <label className="modal-label" htmlFor="editCustomerEmail">Email</label>
-                  <input
-                    id="editCustomerEmail"
-                    type="email"
-                    className="modal-input"
-                    value={editEmail}
-                    onChange={(e) => setEditEmail(e.target.value)}
-                    placeholder="compliance@customer.com"
-                  />
+                  <input id="editCustomerEmail" type="email" className="modal-input" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} />
                 </div>
                 <div className="modal-two-column">
                   <div className="modal-field">
                     <label className="modal-label" htmlFor="editCustomerRisk">Risk Level</label>
-                    <select
-                      id="editCustomerRisk"
-                      className="modal-input"
-                      value={editRisk}
-                      onChange={(e) => setEditRisk(e.target.value as Customer['risk'])}
-                    >
+                    <select id="editCustomerRisk" className="modal-input" value={editRisk} onChange={(e) => setEditRisk(e.target.value as RiskLevel)}>
                       <option value="Low">Low</option>
                       <option value="Medium">Medium</option>
                       <option value="High">High</option>
+                      <option value="Critical">Critical</option>
                     </select>
                   </div>
                   <div className="modal-field">
                     <label className="modal-label" htmlFor="editCustomerKyc">KYC Status</label>
-                    <select
-                      id="editCustomerKyc"
-                      className="modal-input"
-                      value={editKycStatus}
-                      onChange={(e) => setEditKycStatus(e.target.value as Customer['kycStatus'])}
-                    >
+                    <select id="editCustomerKyc" className="modal-input" value={editKycStatus} onChange={(e) => setEditKycStatus(e.target.value as KycStatus)}>
                       <option value="Verified">Verified</option>
                       <option value="Pending">Pending</option>
-                      <option value="Failed">Failed</option>
                     </select>
                   </div>
                 </div>
@@ -765,11 +853,11 @@ export const Customers: React.FC = () => {
       )}
 
       {deleteCustomer && (
-        <div className="modal-backdrop" onClick={handleCloseDeleteModal}>
+        <div className="modal-backdrop" onClick={() => setDeleteCustomer(null)}>
           <div className="modal-panel modal-panel-sm" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2 className="modal-title">Delete Customer</h2>
-              <button className="modal-close-btn" onClick={handleCloseDeleteModal} aria-label="Close">
+              <button className="modal-close-btn" onClick={() => setDeleteCustomer(null)} aria-label="Close">
                 <HiOutlineX size={18} />
               </button>
             </div>
@@ -780,7 +868,7 @@ export const Customers: React.FC = () => {
                 </p>
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn-secondary-action" onClick={handleCloseDeleteModal}>
+                <button type="button" className="btn-secondary-action" onClick={() => setDeleteCustomer(null)}>
                   Cancel
                 </button>
                 <button type="button" className="btn-danger-action" onClick={handleConfirmDelete}>
@@ -793,14 +881,11 @@ export const Customers: React.FC = () => {
       )}
 
       {viewCustomer && (
-        <div className="modal-backdrop" onClick={handleCloseViewModal}>
-          <div
-            className="modal-panel modal-panel-sm"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="modal-backdrop" onClick={() => setViewCustomer(null)}>
+          <div className="modal-panel modal-panel-sm" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2 className="modal-title">View Customer</h2>
-              <button className="modal-close-btn" onClick={handleCloseViewModal} aria-label="Close">
+              <button className="modal-close-btn" onClick={() => setViewCustomer(null)} aria-label="Close">
                 <HiOutlineX size={18} />
               </button>
             </div>
@@ -809,7 +894,7 @@ export const Customers: React.FC = () => {
                 <div className="modal-two-column">
                   <div className="modal-field">
                     <span className="modal-label">Customer ID</span>
-                    <span className="modal-value customer-id">{viewCustomer.id}</span>
+                    <span className="modal-value customer-id">{viewCustomer.displayId}</span>
                   </div>
                   <div className="modal-field">
                     <span className="modal-label">Name</span>
@@ -822,14 +907,24 @@ export const Customers: React.FC = () => {
                     <span className="modal-value">{viewCustomer.email}</span>
                   </div>
                   <div className="modal-field">
-                    <span className="modal-label">Risk Level</span>
-                    <span className={`modal-value risk-text risk-text-${viewCustomer.risk.toLowerCase()}`}>{viewCustomer.risk}</span>
+                    <span className="modal-label">Profile Type</span>
+                    <span className="modal-value">{viewCustomer.profileType}</span>
                   </div>
                 </div>
                 <div className="modal-two-column">
                   <div className="modal-field">
+                    <span className="modal-label">Risk Level</span>
+                    <span className={`modal-value risk-text risk-text-${viewCustomer.risk.toLowerCase()}`}>{viewCustomer.risk}</span>
+                  </div>
+                  <div className="modal-field">
                     <span className="modal-label">KYC Status</span>
                     <span className={`modal-value kyc-text kyc-text-${viewCustomer.kycStatus.toLowerCase()}`}>{viewCustomer.kycStatus}</span>
+                  </div>
+                </div>
+                <div className="modal-two-column">
+                  <div className="modal-field">
+                    <span className="modal-label">Country</span>
+                    <span className="modal-value">{viewCustomer.raw.country || '-'}</span>
                   </div>
                   <div className="modal-field">
                     <span className="modal-label">Last Activity</span>
@@ -838,7 +933,7 @@ export const Customers: React.FC = () => {
                 </div>
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn-primary-action" onClick={handleCloseViewModal}>
+                <button type="button" className="btn-primary-action" onClick={() => setViewCustomer(null)}>
                   Close
                 </button>
               </div>
@@ -849,4 +944,3 @@ export const Customers: React.FC = () => {
     </div>
   )
 }
-

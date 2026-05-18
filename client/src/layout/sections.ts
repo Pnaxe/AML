@@ -11,6 +11,7 @@ export type AmlPageId =
   | 'transactions'
   | 'transactions-upload'
   | 'transactions-upload-data'
+  | 'notifications'
   | 'alerts'
   | 'cases'
   | 'sar'
@@ -50,6 +51,7 @@ export const AML_SECTIONS: AmlSection[] = [
   { id: 'transactions', label: 'Real Time Monitoring' },
   { id: 'transactions-upload', label: 'Batch Monitoring' },
   { id: 'transactions-upload-data', label: 'Upload Data' },
+  { id: 'notifications', label: 'Notifications' },
   { id: 'alerts', label: 'Alerts' },
   { id: 'cases', label: 'Cases' },
   { id: 'modelling', label: 'Select Models' },

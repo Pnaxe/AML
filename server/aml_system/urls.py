@@ -18,10 +18,14 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.views.static import serve
+from django.urls import re_path
 from rest_framework.routers import DefaultRouter
 from rest_framework.authtoken.views import obtain_auth_token
 import accounts.views as accounts_views
 import accounts.auth_views as accounts_auth_views
+import aml_system.views as aml_views
+import aml_system.configuration_views as configuration_views
 import transactions.views as transactions_views
 import alerts.views as alerts_views
 import ml_engine.views as ml_engine_views
@@ -81,21 +85,33 @@ urlpatterns = [
     
     # API Routes
     path('api/', include(router.urls)),
+    path('api/analytics/overview/', aml_views.dashboard_overview, name='api_dashboard_overview'),
+    path('api/analytics/performance/', aml_views.dashboard_performance, name='api_dashboard_performance'),
+    path('api/analytics/activity-feed/', aml_views.dashboard_activity_feed, name='api_dashboard_activity_feed'),
     path('api/auth/token/', obtain_auth_token, name='api_token_auth'),
     path('api/auth/user/', accounts_auth_views.current_user, name='api_current_user'),
     path('api/auth/change-password/', accounts_auth_views.change_password, name='api_change_password'),
+    path('api/system-config/', configuration_views.system_configuration, name='api_system_configuration'),
     path('api-auth/', include('rest_framework.urls')),  # Browsable API login
     path(
         'transactions/stream-demo/',
         transactions_views.transaction_stream_demo,
         name='transaction-stream-demo',
     ),
-    
-    # Note: All frontend routes are now handled by React
-    # The React app should be served separately or through a reverse proxy
 ]
 
 # Serve media files in development
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+    urlpatterns += [
+        re_path(
+            r'^assets/(?P<path>.*)$',
+            serve,
+            {'document_root': aml_views.FRONTEND_DIST_DIR / 'assets'},
+        ),
+        path('', aml_views.frontend_app, name='frontend_app'),
+        re_path(r'^(?!api/|api-auth/|admin/|media/|static/|assets/|transactions/stream-demo/).*$',
+                aml_views.frontend_app,
+                name='frontend_app_catchall'),
+    ]

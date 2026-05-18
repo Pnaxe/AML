@@ -59,11 +59,52 @@ const ICON_SECTIONS: {
   { key: 'configurations', label: 'Configurations', icon: <HiOutlineCog size={20} /> },
 ]
 
+function getActiveRailSection(activeSection: AmlPageId): AmlPageId {
+  if (activeSection === 'activity-feed' || activeSection === 'performance') {
+    return 'dashboard'
+  }
+  if (activeSection === 'data-validation' || activeSection === 'validated-data') {
+    return 'data-management'
+  }
+  if (
+    activeSection === 'screening-manual' ||
+    activeSection === 'screening-approved' ||
+    activeSection === 'screening-declined'
+  ) {
+    return 'screening'
+  }
+  if (activeSection === 'transactions-upload' || activeSection === 'transactions-upload-data') {
+    return 'transactions'
+  }
+  if (activeSection === 'notifications') {
+    return 'alerts'
+  }
+  if (
+    activeSection === 'modelling-load' ||
+    activeSection === 'modelling-calibration' ||
+    activeSection === 'modelling-testing'
+  ) {
+    return 'modelling'
+  }
+  if (activeSection === 'reports-sar' || activeSection === 'reports-exports' || activeSection === 'sar') {
+    return 'reports'
+  }
+  if (
+    activeSection === 'configurations-email' ||
+    activeSection === 'configurations-risk' ||
+    activeSection === 'configurations-api'
+  ) {
+    return 'configurations'
+  }
+  return activeSection
+}
+
 export const IconRail: React.FC<IconRailProps> = ({ activeSection, onSelect, onLogout }) => {
   const { username } = useAuth()
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const initials = getInitials(username)
+  const activeRailSection = getActiveRailSection(activeSection)
 
   useEffect(() => {
     if (!menuOpen) return
@@ -81,25 +122,6 @@ export const IconRail: React.FC<IconRailProps> = ({ activeSection, onSelect, onL
     onLogout?.()
   }
 
-  const isItemActive = (key: AmlPageId) => {
-    if (key === 'screening') {
-      return activeSection === 'screening' || activeSection === 'screening-manual' || activeSection === 'screening-approved' || activeSection === 'screening-declined'
-    }
-    if (key === 'transactions') {
-      return activeSection === 'transactions' || activeSection === 'transactions-upload' || activeSection === 'transactions-upload-data'
-    }
-    if (key === 'modelling') {
-      return activeSection === 'modelling' || activeSection === 'modelling-load' || activeSection === 'modelling-calibration' || activeSection === 'modelling-testing'
-    }
-    if (key === 'reports') {
-      return activeSection === 'reports' || activeSection === 'reports-sar' || activeSection === 'reports-exports'
-    }
-    if (key === 'configurations') {
-      return activeSection === 'configurations' || activeSection === 'configurations-email' || activeSection === 'configurations-risk' || activeSection === 'configurations-api'
-    }
-    return activeSection === key
-  }
-
   return (
     <aside className="icon-rail">
       <div className="icon-rail-top">
@@ -107,7 +129,7 @@ export const IconRail: React.FC<IconRailProps> = ({ activeSection, onSelect, onL
           <button
             key={item.key}
             type="button"
-            className={`icon-rail-item ${isItemActive(item.key) ? 'active' : ''}`}
+            className={`icon-rail-item ${activeRailSection === item.key ? 'active' : ''}`}
             title={item.label}
             onClick={() => onSelect(item.key)}
           >

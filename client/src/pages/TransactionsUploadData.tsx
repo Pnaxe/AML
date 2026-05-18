@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { HiOutlineDownload, HiOutlineUpload, HiOutlineX } from 'react-icons/hi'
+import { useToast } from '../contexts/ToastContext'
 import './Customers.css'
 
 type TransactionRow = {
@@ -17,6 +18,16 @@ type TransactionRow = {
 }
 
 type TransactionResponse = { count?: number; results?: TransactionRow[] } | TransactionRow[]
+type CustomerOption = { id: number; customer_id: string }
+type CustomerResponse = { count?: number; results?: CustomerOption[] } | CustomerOption[]
+type UploadErrorPayload = {
+  message?: string
+  error?: string
+  validation_errors?: string[]
+  missing_columns?: string[]
+  imported_count?: number
+  skipped_count?: number
+}
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api'
 
@@ -25,8 +36,13 @@ function resultsOf<T>(payload: { results?: T[] } | T[]): T[] {
 }
 
 export const TransactionsUploadData: React.FC = () => {
+  const { showToast } = useToast()
   const [rows, setRows] = useState<TransactionRow[]>([])
+  const [customers, setCustomers] = useState<CustomerOption[]>([])
   const [loading, setLoading] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadPhase, setUploadPhase] = useState<'idle' | 'uploading' | 'processing'>('idle')
   const [error, setError] = useState<string | null>(null)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [bulkFile, setBulkFile] = useState<File | null>(null)
@@ -51,22 +67,86 @@ export const TransactionsUploadData: React.FC = () => {
     void loadRows()
   }, [])
 
+  useEffect(() => {
+    void loadCustomers()
+  }, [])
+
+  const loadCustomers = async (): Promise<CustomerOption[]> => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/customers/`)
+      if (!res.ok) return []
+      const payload = (await res.json()) as CustomerResponse
+      const nextCustomers = resultsOf(payload)
+      setCustomers(nextCustomers)
+      return nextCustomers
+    } catch {
+      return []
+    }
+  }
+
   const handleFileImport = async () => {
     if (!bulkFile) return
-    setLoading(true)
+    setIsUploading(true)
+    setUploadProgress(0)
+    setUploadPhase('uploading')
     setError(null)
     try {
       const fd = new FormData()
       fd.append('file', bulkFile)
-      const res = await fetch(`${API_BASE_URL}/transactions/import_excel/`, { method: 'POST', body: fd })
-      if (!res.ok) throw new Error('Failed to upload transaction file')
+      const payload = await new Promise<UploadErrorPayload | null>((resolve, reject) => {
+        const request = new XMLHttpRequest()
+        request.open('POST', `${API_BASE_URL}/transactions/import_excel/`)
+        request.responseType = 'json'
+
+        request.upload.onprogress = (event) => {
+          if (!event.lengthComputable) return
+          setUploadProgress(Math.round((event.loaded / event.total) * 100))
+        }
+
+        request.upload.onload = () => {
+          setUploadProgress(100)
+          setUploadPhase('processing')
+        }
+
+        request.onload = () => {
+          const responsePayload = (request.response as UploadErrorPayload | null) ?? null
+          if (request.status >= 200 && request.status < 300) {
+            setUploadProgress(100)
+            resolve(responsePayload)
+            return
+          }
+          reject(responsePayload)
+        }
+
+        request.onerror = () => reject(null)
+        request.send(fd)
+      }).catch((payload: UploadErrorPayload | null) => {
+        const details = payload?.validation_errors?.slice(0, 3).join(' ')
+          || payload?.missing_columns?.join(', ')
+        console.error('Transaction upload failed', payload)
+        throw new Error(
+          [payload?.message || payload?.error || 'Failed to upload transaction file', details]
+            .filter(Boolean)
+            .join(' ')
+        )
+      })
+
+      const importedCount = payload?.imported_count
+      const skippedCount = payload?.skipped_count ?? 0
       setShowUploadModal(false)
       setBulkFile(null)
       await loadRows()
+      showToast(
+        skippedCount > 0
+          ? `Uploaded "${bulkFile.name}" with ${importedCount ?? 0} imported and ${skippedCount} skipped.`
+          : `Uploaded "${bulkFile.name}" successfully.`
+      )
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to upload file')
     } finally {
-      setLoading(false)
+      setIsUploading(false)
+      setUploadProgress(0)
+      setUploadPhase('idle')
     }
   }
 
@@ -78,7 +158,16 @@ export const TransactionsUploadData: React.FC = () => {
     return { total, pending, completed, flagged }
   }, [rows])
 
-  const downloadTemplate = () => {
+  const downloadTemplate = async () => {
+    const availableCustomers = customers.length > 0 ? customers : await loadCustomers()
+    const senderCustomerId = availableCustomers[0]?.customer_id
+    const receiverCustomerId = availableCustomers[1]?.customer_id ?? senderCustomerId
+
+    if (!senderCustomerId) {
+      setError('Unable to generate a valid template yet because no active customers were found. Create a customer first, then download the template again.')
+      return
+    }
+
     const header = [
       'transaction_id',
       'transaction_type',
@@ -91,12 +180,12 @@ export const TransactionsUploadData: React.FC = () => {
       'description',
     ].join(',')
     const sample = [
-      'TX-100001',
+      `TX-${Date.now()}`,
       'TRANSFER',
       '1500.00',
       'USD',
-      'CUST-000101',
-      'CUST-000245',
+      senderCustomerId,
+      receiverCustomerId ?? '',
       'PENDING',
       new Date().toISOString(),
       'Sample transaction import row',
@@ -111,6 +200,29 @@ export const TransactionsUploadData: React.FC = () => {
     link.click()
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
+  }
+
+  const downloadExcelTemplate = async () => {
+    setError(null)
+    try {
+      const res = await fetch(`${API_BASE_URL}/transactions/download_excel_template/`)
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => null)) as { message?: string; error?: string } | null
+        throw new Error(payload?.message || payload?.error || 'Unable to download Excel template')
+      }
+
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'transactions_upload_template.xlsx'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unable to download Excel template')
+    }
   }
 
   return (
@@ -132,6 +244,11 @@ export const TransactionsUploadData: React.FC = () => {
         <div className="customers-filters-card report-filters upload-data-main-card">
           <div className="bulk-import-card">
             <div className="bulk-import-body">
+              {error && (
+                <div className="customers-filters-card" role="alert" style={{ marginBottom: '16px' }}>
+                  <span className="muted">{error}</span>
+                </div>
+              )}
               <div className="upload-data-intro">
                 <h3 className="bulk-import-title">Upload Workspace</h3>
                 <p className="bulk-import-text">
@@ -146,7 +263,7 @@ export const TransactionsUploadData: React.FC = () => {
                       <HiOutlineUpload size={20} aria-hidden />
                     </div>
                     <p className="bulk-import-drop-main">Upload a transaction batch file</p>
-                    <p className="bulk-import-drop-sub">Accepted formats: `.xlsx` and `.xls`</p>
+                    <p className="bulk-import-drop-sub">Accepted formats: `.csv`, `.xlsx`, and `.xls`</p>
                     <button type="button" className="btn-primary-action btn-with-icon" onClick={() => setShowUploadModal(true)}>
                       <HiOutlineUpload size={16} aria-hidden />
                       <span>Select File</span>
@@ -156,18 +273,27 @@ export const TransactionsUploadData: React.FC = () => {
                 <div className="bulk-import-sidebar">
                   <div className="upload-data-side-header">
                     <h4 className="bulk-import-sidebar-title">Upload Toolkit</h4>
-                    <button type="button" className="btn-upload-template btn-with-icon" onClick={downloadTemplate}>
-                      <HiOutlineDownload size={16} aria-hidden />
-                      <span>Download Template</span>
-                    </button>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <button type="button" className="btn-upload-template btn-with-icon" onClick={() => void downloadTemplate()}>
+                        <HiOutlineDownload size={16} aria-hidden />
+                        <span>CSV Template</span>
+                      </button>
+                      <button type="button" className="btn-upload-template btn-with-icon" onClick={() => void downloadExcelTemplate()}>
+                        <HiOutlineDownload size={16} aria-hidden />
+                        <span>Excel Template</span>
+                      </button>
+                    </div>
                   </div>
                   <p className="bulk-import-text upload-data-helper">
                     Use the template to match the required schema before uploading your batch file.
                   </p>
+                  <p className="bulk-import-text upload-data-helper">
+                    Template customer values are generated from active customers already in the system when available.
+                  </p>
                   <div className="upload-data-checklist">
                     <span className="upload-data-check-item">Unique transaction ID per row</span>
                     <span className="upload-data-check-item">Amounts in numeric format</span>
-                    <span className="upload-data-check-item">Valid sender and receiver customer IDs</span>
+                    <span className="upload-data-check-item">Valid sender and receiver customer IDs or customer codes</span>
                     <span className="upload-data-check-item">ISO timestamp for transaction date</span>
                   </div>
                   <div className="view-profile-grid">
@@ -212,26 +338,35 @@ export const TransactionsUploadData: React.FC = () => {
               </button>
             </div>
             <div className="modal-form">
-              <div className="modal-body">
-                <div className="modal-field">
-                  <label className="modal-label">Select Excel file</label>
+                <div className="modal-body">
+                  {error && (
+                    <div className="customers-filters-card" role="alert" style={{ marginBottom: '16px' }}>
+                      <span className="muted">{error}</span>
+                    </div>
+                  )}
+                  <div className="modal-field">
+                  <label className="modal-label">Select CSV or Excel file</label>
                   <input
                     type="file"
                     className="modal-input"
-                    accept=".xlsx,.xls"
+                    accept=".csv,.xlsx,.xls"
                     onChange={(e) => setBulkFile(e.target.files?.[0] ?? null)}
                   />
                 </div>
                 <p className="bulk-import-text">
-                  Upload a transaction export from your source system. The file will be imported and added to the batch monitoring queue.
+                  Upload a transaction export from your source system. CSV and Excel files are imported into the batch monitoring queue.
                 </p>
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn-secondary-action" onClick={() => setShowUploadModal(false)}>
                   Cancel
                 </button>
-                <button type="button" className="btn-primary-action" onClick={() => void handleFileImport()} disabled={!bulkFile || loading}>
-                  {loading ? 'Uploading...' : 'Upload'}
+                <button type="button" className="btn-primary-action" onClick={() => void handleFileImport()} disabled={!bulkFile || isUploading}>
+                  {isUploading
+                    ? uploadPhase === 'processing'
+                      ? 'Processing...'
+                      : `Uploading ${uploadProgress}%`
+                    : 'Upload'}
                 </button>
               </div>
             </div>

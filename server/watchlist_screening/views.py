@@ -6,9 +6,14 @@ from django.db.models import Q
 from django.conf import settings
 from django.utils import timezone
 from accounts.models import Customer
+from aml_system.configuration_views import _build_config_payload
 from .screening_service import ScreeningService
 from .models import ScreeningMatch, WatchlistSource
 import logging
+import json
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 try:
     from kyc.models import KYCProfile
@@ -70,6 +75,158 @@ class ScreeningViewSet(viewsets.ViewSet):
             profile.save(using=source_db, update_fields=update_fields)
         except Exception:
             pass
+
+    @staticmethod
+    def _configured_screening_api_sources():
+        config = _build_config_payload()
+        built_in_sources = [
+            ('screeningApiKey', 'Screening API'),
+            ('watchlistApiKey', 'Watchlist DB API'),
+            ('blacklistApiKey', 'Blacklist API'),
+        ]
+        api_sources = []
+
+        for field, name in built_in_sources:
+            key = str(config.get(field) or '').strip()
+            api_sources.append({
+                'id': field,
+                'name': name,
+                'type': 'BUILT_IN',
+                'status': 'CONNECTED' if key else 'NOT_CONFIGURED',
+                'used_for': 'Manual person screening',
+                'last_four': key[-4:] if key else '',
+            })
+
+        for item in config.get('customApiKeys') or []:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get('key') or '').strip()
+            name = str(item.get('name') or '').strip()
+            if not name or not key:
+                continue
+            api_sources.append({
+                'id': str(item.get('id') or name),
+                'name': name,
+                'type': 'CUSTOM',
+                'status': 'CONNECTED',
+                'used_for': 'Manual person screening',
+                'last_four': key[-4:],
+            })
+
+        return api_sources
+
+    @staticmethod
+    def _dilisense_key_from_config():
+        config = _build_config_payload()
+        for item in config.get('customApiKeys') or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get('name') or '').strip().lower()
+            key = str(item.get('key') or '').strip()
+            if key and any(alias in name for alias in ['dilisense', 'delisence', 'dili sense', 'dili']):
+                return key
+        return str(config.get('screeningApiKey') or '').strip()
+
+    @staticmethod
+    def _safe_join(value):
+        if isinstance(value, dict):
+            return json.dumps(value, ensure_ascii=False)
+        if isinstance(value, list):
+            cleaned = []
+            for item in value:
+                if isinstance(item, dict):
+                    cleaned.append(json.dumps(item, ensure_ascii=False))
+                elif item:
+                    cleaned.append(str(item))
+            return ', '.join(cleaned)
+        if value is None:
+            return ''
+        return str(value)
+
+    def _flatten_dilisense_record(self, record):
+        details = {}
+        for key, value in record.items():
+            if value in (None, '', [], {}):
+                continue
+            details[key] = self._safe_join(value)
+        return details
+
+    @staticmethod
+    def _source_type_for_match(match):
+        raw_type = str(match.get('type') or '').upper()
+        if 'SANCTION' in raw_type:
+            return 'SANCTIONS'
+        if 'PEP' in raw_type:
+            return 'PEP'
+        if 'CRIMINAL' in raw_type:
+            return 'CRIMINAL'
+        if 'ADVERSE' in raw_type:
+            return 'ADVERSE_MEDIA'
+        if 'TERROR' in raw_type:
+            return 'TERRORIST'
+        if 'FRAUD' in raw_type:
+            return 'FRAUD'
+        return 'CUSTOM'
+
+    @staticmethod
+    def _similarity_for_match(match):
+        raw_similarity = match.get('similarity')
+        if raw_similarity is None:
+            return 0.95 if match.get('source') == 'Dilisense' else 0.85
+        try:
+            return float(raw_similarity)
+        except (TypeError, ValueError):
+            return 0.85
+
+    def _run_dilisense_screening(self, name, entity_type):
+        api_key = self._dilisense_key_from_config()
+        provider = {
+            'id': 'dilisense',
+            'name': 'Dilisense AML Screening API',
+            'type': 'EXTERNAL',
+            'status': 'NOT_CONFIGURED' if not api_key else 'CONNECTED',
+            'used_for': 'Sanctions, PEP, criminal and wanted-list screening',
+            'last_four': api_key[-4:] if api_key else '',
+        }
+
+        if not api_key:
+            return [], provider
+
+        endpoint = 'checkEntity' if entity_type == 'ORGANIZATION' else 'checkIndividual'
+        query = urlencode({'names': name, 'fuzzy_search': '1'})
+        url = f'https://api.dilisense.com/v1/{endpoint}?{query}'
+        request = Request(url, headers={'x-api-key': api_key, 'Accept': 'application/json'})
+
+        try:
+            with urlopen(request, timeout=12) as response:
+                payload = json.loads(response.read().decode('utf-8'))
+            provider['status'] = 'SEARCHED'
+        except HTTPError as exc:
+            provider['status'] = 'ERROR'
+            provider['error'] = f'Dilisense returned HTTP {exc.code}'
+            return [], provider
+        except (URLError, TimeoutError, ValueError) as exc:
+            provider['status'] = 'ERROR'
+            provider['error'] = str(exc)
+            return [], provider
+
+        matches = []
+        for record in payload.get('found_records') or []:
+            if not isinstance(record, dict):
+                continue
+            source_type = record.get('source_type') or 'UNKNOWN'
+            matched_name = record.get('name') or record.get('entity_name') or record.get('tl_name') or name
+            matches.append({
+                'type': source_type,
+                'source': 'Dilisense',
+                'entry_id': record.get('id') or f"dilisense-{len(matches) + 1}",
+                'matched_name': matched_name,
+                'similarity': None,
+                'details': self._flatten_dilisense_record(record),
+            })
+
+        provider['total_hits'] = payload.get('total_hits', len(matches))
+        return matches, provider
     
     @action(detail=False, methods=['post'])
     def run_screening(self, request):
@@ -262,6 +419,23 @@ class ScreeningViewSet(viewsets.ViewSet):
 
                 customer = Customer.objects.using(source_db).get(id=customer_pk, is_active=True)
                 screening_results = screening_service.screen_customer(customer)
+                customer_name = customer.get_full_name() if customer.customer_type == 'INDIVIDUAL' else customer.company_name
+                entity_type = 'ORGANIZATION' if customer.customer_type == 'CORPORATE' else 'INDIVIDUAL'
+                dilisense_matches, _dilisense_source = self._run_dilisense_screening(customer_name or '', entity_type) if customer_name else ([], None)
+                if dilisense_matches:
+                    screening_results.setdefault('matches', []).extend(dilisense_matches)
+                    screening_results.setdefault('risk_flags', []).append('DILISENSE_MATCH')
+                    screening_results['overall_status'] = 'REVIEW' if screening_results.get('overall_status') == 'CLEAR' else screening_results.get('overall_status', 'REVIEW')
+                    for provider_match in dilisense_matches:
+                        match_type = str(provider_match.get('type') or '').upper()
+                        if 'PEP' in match_type:
+                            screening_results['pep_match'] = True
+                        if 'SANCTION' in match_type:
+                            screening_results['sanctions_match'] = True
+                        if 'CRIMINAL' in match_type:
+                            screening_results['criminal_match'] = True
+                        if 'ADVERSE' in match_type:
+                            screening_results['adverse_media_match'] = True
 
                 if screening_results.get('pep_match'):
                     customer.is_pep = True
@@ -303,7 +477,7 @@ class ScreeningViewSet(viewsets.ViewSet):
                         source, _ = WatchlistSource.objects.using(source_db).get_or_create(
                             name=match.get('source', 'Unknown'),
                             defaults={
-                                'source_type': match.get('type', 'CUSTOM'),
+                                'source_type': self._source_type_for_match(match),
                                 'provider': match.get('source', 'Unknown'),
                                 'status': 'ACTIVE',
                                 'is_enabled': True
@@ -327,7 +501,7 @@ class ScreeningViewSet(viewsets.ViewSet):
                             }
                         )
 
-                        similarity = match.get('similarity', 0.85)
+                        similarity = self._similarity_for_match(match)
                         if similarity >= 0.9:
                             match_type = 'EXACT'
                         elif similarity >= 0.8:
@@ -397,6 +571,16 @@ class ScreeningViewSet(viewsets.ViewSet):
             country=country,
             email=email,
         )
+        api_sources = self._configured_screening_api_sources()
+        dilisense_matches, dilisense_source = self._run_dilisense_screening(name, entity_type)
+        api_sources = [dilisense_source, *api_sources]
+        if dilisense_matches:
+            screening_results.setdefault('matches', []).extend(dilisense_matches)
+            if 'DILISENSE_MATCH' not in screening_results.setdefault('risk_flags', []):
+                screening_results['risk_flags'].append('DILISENSE_MATCH')
+            if screening_results.get('overall_status') == 'CLEAR':
+                screening_results['overall_status'] = 'REVIEW'
+        connected_api_count = len([source for source in api_sources if source.get('status') in {'CONNECTED', 'SEARCHED'}])
 
         matches = []
         for idx, match in enumerate(screening_results.get('matches', []), start=1):
@@ -423,7 +607,10 @@ class ScreeningViewSet(viewsets.ViewSet):
                 'risk_flags': screening_results.get('risk_flags', []),
                 'overall_status': screening_results.get('overall_status', 'CLEAR'),
                 'screening_date': screening_results.get('screening_date'),
+                'apis_checked': connected_api_count,
+                'total_api_sources': len(api_sources),
             },
+            'api_sources': api_sources,
             'matches': matches,
         }, status=status.HTTP_200_OK)
     
@@ -542,6 +729,35 @@ class ScreeningViewSet(viewsets.ViewSet):
                 'evidence_data': match.evidence_data,
             })
 
+        risk_flags = []
+        if customer.is_pep:
+            risk_flags.append('PEP_MATCH')
+        if customer.is_sanctioned:
+            risk_flags.append('SANCTIONS_MATCH')
+        if any(row['source'] == 'Dilisense' for row in match_rows):
+            risk_flags.append('DILISENSE_MATCH')
+        if customer.risk_level in {'HIGH', 'CRITICAL'} and not risk_flags:
+            risk_flags.append(f'{customer.risk_level}_RISK')
+
+        api_sources = self._configured_screening_api_sources()
+        dilisense_key = self._dilisense_key_from_config()
+        dilisense_hits = sum(1 for row in match_rows if row['source'] == 'Dilisense')
+        api_sources = [{
+            'id': 'dilisense',
+            'name': 'Dilisense AML Screening API',
+            'type': 'EXTERNAL',
+            'status': 'SEARCHED' if dilisense_hits else ('CONNECTED' if dilisense_key else 'NOT_CONFIGURED'),
+            'used_for': 'Sanctions, PEP, criminal and wanted-list screening',
+            'last_four': dilisense_key[-4:] if dilisense_key else '',
+            'total_hits': dilisense_hits,
+        }, *api_sources]
+        connected_api_count = len([source for source in api_sources if source.get('status') in {'CONNECTED', 'SEARCHED'}])
+        overall_status = 'CLEAR'
+        if customer.is_sanctioned or customer.risk_level == 'CRITICAL':
+            overall_status = 'BLOCK'
+        elif match_rows or customer.is_pep or customer.risk_level in {'HIGH', 'MEDIUM'}:
+            overall_status = 'REVIEW'
+
         customer_name = customer.get_full_name() if customer.customer_type == 'INDIVIDUAL' else customer.company_name
         return Response({
             'customer': {
@@ -565,7 +781,13 @@ class ScreeningViewSet(viewsets.ViewSet):
                 'open_matches': sum(1 for row in match_rows if row['status'] in {'NEW', 'UNDER_REVIEW'}),
                 'confirmed_matches': sum(1 for row in match_rows if row['status'] == 'CONFIRMED'),
                 'false_positive_matches': sum(1 for row in match_rows if row['status'] == 'FALSE_POSITIVE'),
+                'risk_flags': risk_flags,
+                'overall_status': overall_status,
+                'screening_date': timezone.now().isoformat(),
+                'apis_checked': connected_api_count,
+                'total_api_sources': len(api_sources),
             },
+            'api_sources': api_sources,
             'matches': match_rows,
         })
 

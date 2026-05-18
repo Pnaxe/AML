@@ -55,6 +55,8 @@ const iconForPage = (id: AmlPageId): React.ReactNode => {
       return <HiOutlineDatabase size={18} />
     case 'transactions-upload-data':
       return <HiOutlineDatabase size={18} />
+    case 'notifications':
+      return <HiOutlineBell size={18} />
     case 'alerts':
       return <HiOutlineBell size={18} />
     case 'cases':
@@ -132,6 +134,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ open, setOpen, activePage, onS
           <div className="logo-wrap">
             <Logo />
           </div>
+          <button
+            type="button"
+            className="sidebar-mobile-close"
+            aria-label="Close sidebar"
+            onClick={() => setOpen(false)}
+          >
+            ×
+          </button>
         </div>
         <nav className="sidebar-nav">
           {visibleSections.map((item) => (

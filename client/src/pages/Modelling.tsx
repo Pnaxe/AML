@@ -103,7 +103,7 @@ export const Modelling: React.FC<ModellingProps> = ({ variant = 'use' }) => {
   const { showToast } = useToast()
   const [models, setModels] = useState<MlModel[]>([])
   const [datasets, setDatasets] = useState<DatasetItem[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [showLoadModal, setShowLoadModal] = useState(false)
@@ -644,14 +644,22 @@ export const Modelling: React.FC<ModellingProps> = ({ variant = 'use' }) => {
           </div>
         )}
 
-        <div className={`customers-table-card-outer ${!error && !notice && pageModels.length === 0 ? 'table-empty-state' : ''}`}>
-          {!error && !notice && pageModels.length === 0 && (
+        <div className={`customers-table-card-outer ${!loading && !error && !notice && pageModels.length === 0 ? 'table-empty-state' : ''}`}>
+          {!loading && !error && !notice && pageModels.length === 0 && (
             <div className="table-empty-watermark" aria-hidden="true">
               <HiOutlineChip size={42} />
               <span>No Models</span>
             </div>
           )}
-          <div className="report-content-container ecl-table-container">
+          <div className="report-content-container ecl-table-container table-loading-shell">
+            {loading && (
+              <div className="table-loading-overlay" aria-hidden="true">
+                <div className="table-loading-indicator">
+                  <div className="table-loading-spinner" />
+                  <span className="table-loading-text">Loading models...</span>
+                </div>
+              </div>
+            )}
             <table className="ecl-table">
               <thead>
                 <tr>
@@ -670,64 +678,40 @@ export const Modelling: React.FC<ModellingProps> = ({ variant = 'use' }) => {
                   <tr><td colSpan={8} className="muted">{error}</td></tr>
                 ) : notice ? (
                   <tr><td colSpan={8} className="muted">{notice}</td></tr>
-                ) : pageModels.length === 0 ? (
-                  <tr><td colSpan={8} className="muted">{loading ? 'Loading models...' : 'No models loaded yet.'}</td></tr>
-                ) : (
-                  pageModels.map((m) => (
-                    <tr key={m.id}>
-                      <td className="customer-id">{m.name}</td>
-                      <td>{m.version}</td>
-                      <td>{m.algorithm}</td>
-                      <td><span className={`pill ${m.status === 'ACTIVE' ? 'pill-kyc-verified' : 'pill-medium'}`}>{m.status}</span></td>
-                      <td className="muted">{m.accuracy == null ? '-' : `${(m.accuracy * 100).toFixed(1)}%`}</td>
-                      <td className="muted">{m.model_file_path || '-'}</td>
-                      <td className="muted">{fmtDate(m.updated_at)}</td>
-                      <td>
-                        {variant === 'use' ? (
-                          <div className="customers-actions">
-                            <HiOutlinePencil
-                              size={18}
-                              className={`action-icon action-icon-edit ${loading || m.id < 0 ? 'action-icon-disabled' : ''}`}
-                              onClick={() => {
-                                if (loading || m.id < 0) return
-                                setRenameCandidate(m)
-                                setRenameValue(m.name)
-                              }}
-                              title="Rename model"
-                              aria-label={`Rename ${m.name}`}
-                            />
-                            <HiOutlineLightningBolt
-                              size={18}
-                              className={`action-icon action-icon-view ${loading || m.id < 0 ? 'action-icon-disabled' : ''}`}
-                              onClick={() => {
-                                if (!(loading || m.id < 0)) setToggleCandidate(m)
-                              }}
-                              title={m.status === 'ACTIVE' ? 'Turn off model' : 'Turn on model'}
-                              aria-label={m.status === 'ACTIVE' ? `Turn off ${m.name}` : `Turn on ${m.name}`}
-                            />
-                            <HiOutlineTrash
-                              size={18}
-                              className={`action-icon action-icon-delete ${loading || m.id < 0 ? 'action-icon-disabled' : ''}`}
-                              onClick={() => {
-                                if (!(loading || m.id < 0)) setDeleteCandidate(m)
-                              }}
-                              title="Delete model"
-                              aria-label={`Delete ${m.name}`}
-                            />
-                          </div>
-                        ) : variant === 'load' ? (
-                          <div className="customers-actions">
-                            <HiOutlineLightningBolt
-                              size={18}
-                              className={`action-icon action-icon-view ${loading || m.status === 'ACTIVE' || m.id < 0 ? 'action-icon-disabled' : ''}`}
-                              onClick={() => setToggleCandidate(m)}
-                              title={m.status === 'ACTIVE' ? 'Already approved' : 'Approve model'}
-                              aria-label={m.status === 'ACTIVE' ? `Approved ${m.name}` : `Approve ${m.name}`}
-                            />
-                          </div>
-                        ) : (
-                          <div className="customers-actions">
-                            {variant === 'calibration' ? (
+                ) : loading ? null : (
+                  pageModels
+                    .map((m) => (
+                      <tr key={m.id}>
+                        <td className="customer-id">{m.name}</td>
+                        <td>{m.version}</td>
+                        <td>{m.algorithm}</td>
+                        <td><span className={`pill ${m.status === 'ACTIVE' ? 'pill-kyc-verified' : 'pill-medium'}`}>{m.status}</span></td>
+                        <td className="muted">{m.accuracy == null ? '-' : `${(m.accuracy * 100).toFixed(1)}%`}</td>
+                        <td className="muted">{m.model_file_path || '-'}</td>
+                        <td className="muted">{fmtDate(m.updated_at)}</td>
+                        <td>
+                          {variant === 'use' ? (
+                            <div className="customers-actions">
+                              <HiOutlinePencil
+                                size={18}
+                                className={`action-icon action-icon-edit ${loading || m.id < 0 ? 'action-icon-disabled' : ''}`}
+                                onClick={() => {
+                                  if (loading || m.id < 0) return
+                                  setRenameCandidate(m)
+                                  setRenameValue(m.name)
+                                }}
+                                title="Rename model"
+                                aria-label={`Rename ${m.name}`}
+                              />
+                              <HiOutlineLightningBolt
+                                size={18}
+                                className={`action-icon action-icon-view ${loading || m.id < 0 ? 'action-icon-disabled' : ''}`}
+                                onClick={() => {
+                                  if (!(loading || m.id < 0)) setToggleCandidate(m)
+                                }}
+                                title={m.status === 'ACTIVE' ? 'Turn off model' : 'Turn on model'}
+                                aria-label={m.status === 'ACTIVE' ? `Turn off ${m.name}` : `Turn on ${m.name}`}
+                              />
                               <HiOutlineTrash
                                 size={18}
                                 className={`action-icon action-icon-delete ${loading || m.id < 0 ? 'action-icon-disabled' : ''}`}
@@ -737,36 +721,60 @@ export const Modelling: React.FC<ModellingProps> = ({ variant = 'use' }) => {
                                 title="Delete model"
                                 aria-label={`Delete ${m.name}`}
                               />
-                            ) : variant === 'testing' ? (
-                              <button
-                                type="button"
-                                className="btn-primary-action"
-                                onClick={() => openApproveModal(m)}
-                                disabled={loading || m.status === 'ACTIVE' || m.id < 0}
-                              >
-                                Approve
-                              </button>
-                            ) : (
-                              <span className="muted">No direct action</span>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  )).concat(
-                    Array.from({ length: blankRowCount }).map((_, index) => (
-                      <tr key={`blank-row-${index}`} aria-hidden>
-                        <td>&nbsp;</td>
-                        <td>&nbsp;</td>
-                        <td>&nbsp;</td>
-                        <td>&nbsp;</td>
-                        <td>&nbsp;</td>
-                        <td>&nbsp;</td>
-                        <td>&nbsp;</td>
-                        <td>&nbsp;</td>
+                            </div>
+                          ) : variant === 'load' ? (
+                            <div className="customers-actions">
+                              <HiOutlineLightningBolt
+                                size={18}
+                                className={`action-icon action-icon-view ${loading || m.status === 'ACTIVE' || m.id < 0 ? 'action-icon-disabled' : ''}`}
+                                onClick={() => setToggleCandidate(m)}
+                                title={m.status === 'ACTIVE' ? 'Already approved' : 'Approve model'}
+                                aria-label={m.status === 'ACTIVE' ? `Approved ${m.name}` : `Approve ${m.name}`}
+                              />
+                            </div>
+                          ) : (
+                            <div className="customers-actions">
+                              {variant === 'calibration' ? (
+                                <HiOutlineTrash
+                                  size={18}
+                                  className={`action-icon action-icon-delete ${loading || m.id < 0 ? 'action-icon-disabled' : ''}`}
+                                  onClick={() => {
+                                    if (!(loading || m.id < 0)) setDeleteCandidate(m)
+                                  }}
+                                  title="Delete model"
+                                  aria-label={`Delete ${m.name}`}
+                                />
+                              ) : variant === 'testing' ? (
+                                <button
+                                  type="button"
+                                  className="btn-primary-action"
+                                  onClick={() => openApproveModal(m)}
+                                  disabled={loading || m.status === 'ACTIVE' || m.id < 0}
+                                >
+                                  Approve
+                                </button>
+                              ) : (
+                                <span className="muted">No direct action</span>
+                              )}
+                            </div>
+                          )}
+                        </td>
                       </tr>
-                    )),
-                  )
+                    ))
+                    .concat(
+                      Array.from({ length: blankRowCount }).map((_, index) => (
+                        <tr key={`blank-row-${index}`} aria-hidden>
+                          <td>&nbsp;</td>
+                          <td>&nbsp;</td>
+                          <td>&nbsp;</td>
+                          <td>&nbsp;</td>
+                          <td>&nbsp;</td>
+                          <td>&nbsp;</td>
+                          <td>&nbsp;</td>
+                          <td>&nbsp;</td>
+                        </tr>
+                      )),
+                    )
                 )}
               </tbody>
             </table>

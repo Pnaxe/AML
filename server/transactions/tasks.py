@@ -86,10 +86,11 @@ def _normalized_status(transaction):
 def build_transaction_stream_payload(transaction):
     payload = transaction.to_stream_payload()
     payload['status'] = _normalized_status(transaction)
+    payload['persisted'] = True
     return payload
 
 
-def broadcast_transaction_update(transaction):
+def broadcast_stream_payload(payload):
     if async_to_sync is None:
         return
 
@@ -102,9 +103,17 @@ def broadcast_transaction_update(transaction):
             TRANSACTIONS_STREAM_GROUP,
             {
                 'type': 'transaction.message',
-                'payload': build_transaction_stream_payload(transaction),
+                'payload': payload,
             },
         )
+    except Exception as exc:
+        logger.warning('Failed to broadcast websocket payload: %s', exc)
+
+
+def broadcast_transaction_update(transaction):
+    payload = build_transaction_stream_payload(transaction)
+    try:
+        broadcast_stream_payload(payload)
     except Exception as exc:
         logger.warning(
             'Failed to broadcast transaction %s to websocket clients: %s',
@@ -194,33 +203,65 @@ def generate_and_stream_transaction():
     currency = choice(CURRENCY_OPTIONS)
     now = timezone.now()
 
-    transaction = Transaction.objects.create(
-        transaction_id=f"TXN-{now.strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:6].upper()}",
-        reference_number=f"REF-{fake.bothify(text='??########').upper()}",
-        transaction_type=transaction_type,
-        amount=amount,
-        currency=currency,
-        sender=sender,
-        receiver=receiver,
-        originating_country=originating_country,
-        destination_country=destination_country,
-        sender_account=fake.numerify(text='26##########'),
-        receiver_account=fake.numerify(text='41##########') if receiver else '',
-        sender_bank=sender_bank,
-        receiver_bank=receiver_bank if receiver else choice(GLOBAL_MERCHANTS),
-        description=fake.sentence(nb_words=8),
-        status=status,
-        transaction_date=now,
-        channel=choice(CHANNEL_OPTIONS),
-        device_id=f"DEV-{uuid4().hex[:10].upper()}",
-        risk_score=round(random(), 2),
-        is_suspicious=status in {'FLAGGED', 'BLOCKED'} or amount >= Decimal('10000.00'),
-        amount_threshold_flag=amount >= Decimal('10000.00'),
-        high_risk_country_flag=destination_country not in {'Zimbabwe', 'South Africa'},
-        unusual_pattern_flag=random() > 0.82,
-        velocity_flag=random() > 0.88,
-        structuring_flag=random() > 0.9,
-    )
+    transaction_id = f"TXN-{now.strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:6].upper()}"
+    is_suspicious = status in {'FLAGGED', 'BLOCKED'} or amount >= Decimal('10000.00')
 
-    broadcast_transaction_update(transaction)
-    return build_transaction_stream_payload(transaction)
+    # Persist only suspicious/flagged transactions; stream all generated activity.
+    if is_suspicious:
+        transaction = Transaction.objects.create(
+            transaction_id=transaction_id,
+            reference_number=f"REF-{fake.bothify(text='??########').upper()}",
+            transaction_type=transaction_type,
+            amount=amount,
+            currency=currency,
+            sender=sender,
+            receiver=receiver,
+            originating_country=originating_country,
+            destination_country=destination_country,
+            sender_account=fake.numerify(text='26##########'),
+            receiver_account=fake.numerify(text='41##########') if receiver else '',
+            sender_bank=sender_bank,
+            receiver_bank=receiver_bank if receiver else choice(GLOBAL_MERCHANTS),
+            description=fake.sentence(nb_words=8),
+            status=status,
+            transaction_date=now,
+            channel=choice(CHANNEL_OPTIONS),
+            device_id=f"DEV-{uuid4().hex[:10].upper()}",
+            risk_score=round(random(), 2),
+            is_suspicious=is_suspicious,
+            amount_threshold_flag=amount >= Decimal('10000.00'),
+            high_risk_country_flag=destination_country not in {'Zimbabwe', 'South Africa'},
+            unusual_pattern_flag=random() > 0.82,
+            velocity_flag=random() > 0.88,
+            structuring_flag=random() > 0.9,
+        )
+        broadcast_transaction_update(transaction)
+        return build_transaction_stream_payload(transaction)
+
+    payload = {
+        'id': f"RT-{uuid4().hex[:10]}",
+        'reference': f"REF-{fake.bothify(text='??########').upper()}",
+        'account_number': fake.numerify(text='26##########'),
+        'customer_name': sender.get_full_name() if sender else '',
+        'merchant_name': receiver.get_full_name() if receiver else choice(GLOBAL_MERCHANTS),
+        'amount': str(amount),
+        'currency': currency,
+        'direction': 'DR' if transaction_type in Transaction.OUTGOING_TRANSACTION_TYPES else 'CR',
+        'status': 'SUCCESS' if status in {'COMPLETED', 'CLEARED'} else 'PENDING',
+        'workflow_status': status,
+        'created_at': now.isoformat(),
+        'transaction_id': transaction_id,
+        'transaction_type': transaction_type,
+        'sender_name': sender.get_full_name() if sender else '',
+        'receiver_name': receiver.get_full_name() if receiver else '',
+        'originating_country': originating_country,
+        'destination_country': destination_country,
+        'sender_bank': sender_bank,
+        'receiver_bank': receiver_bank if receiver else '',
+        'risk_score': round(random(), 2),
+        'is_suspicious': False,
+        'persisted': False,
+    }
+
+    broadcast_stream_payload(payload)
+    return payload

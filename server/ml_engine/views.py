@@ -7,6 +7,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.conf import settings
 from django.db.models import QuerySet
+from datetime import datetime, timezone as datetime_timezone
 from pathlib import Path
 import re
 from urllib.parse import unquote
@@ -325,7 +326,7 @@ class MLModelViewSet(viewsets.ModelViewSet):
             results.append({
                 'dataset_file': fp.name,
                 'size_bytes': stat.st_size,
-                'uploaded_at': timezone.datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                'uploaded_at': datetime.fromtimestamp(stat.st_mtime, tz=datetime_timezone.utc).isoformat(),
             })
         return Response({'count': len(results), 'results': results})
 

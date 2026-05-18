@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { HiOutlineSearch, HiOutlineX, HiOutlineEye, HiOutlineArrowLeft } from 'react-icons/hi'
+import { HiOutlineSearch, HiOutlineX, HiOutlineEye, HiOutlineArrowLeft, HiOutlineBell } from 'react-icons/hi'
 import './Customers.css'
 import './KYC.css'
 
@@ -51,7 +51,7 @@ function fmtDate(v?: string): string {
 
 export const Cases: React.FC = () => {
   const [cases, setCases] = useState<CaseItem[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [activeSearchTerm, setActiveSearchTerm] = useState('')
@@ -259,8 +259,22 @@ export const Cases: React.FC = () => {
           </div>
         </div>
 
-        <div className="customers-table-card-outer">
-          <div className="report-content-container ecl-table-container">
+        <div className={`customers-table-card-outer ${!loading && !error && pageRows.length === 0 ? 'table-empty-state' : ''}`}>
+          {!loading && !error && pageRows.length === 0 && (
+            <div className="table-empty-watermark" aria-hidden="true">
+              <HiOutlineBell size={42} />
+              <span>No Cases</span>
+            </div>
+          )}
+          <div className="report-content-container ecl-table-container table-loading-shell">
+            {loading && (
+              <div className="table-loading-overlay" aria-hidden="true">
+                <div className="table-loading-indicator">
+                  <div className="table-loading-spinner" />
+                  <span className="table-loading-text">Loading cases...</span>
+                </div>
+              </div>
+            )}
             <table className="ecl-table">
               <thead>
                 <tr>
@@ -278,7 +292,7 @@ export const Cases: React.FC = () => {
                 {error ? (
                   <tr><td colSpan={8} className="muted">{error}</td></tr>
                 ) : (
-                  pageRows.map((c) => (
+                  !loading && pageRows.map((c) => (
                     <tr key={c.id}>
                       <td className="customer-id">{c.alert_id}</td>
                       <td>{c.customer_name} <span className="muted">({c.customer_id})</span></td>
@@ -295,7 +309,7 @@ export const Cases: React.FC = () => {
                     </tr>
                   ))
                 )}
-                {!error && Array.from({ length: Math.max(0, PAGE_SIZE - pageRows.length) }).map((_, idx) => (
+                {!loading && !error && Array.from({ length: Math.max(0, PAGE_SIZE - pageRows.length) }).map((_, idx) => (
                   <tr key={`empty-${idx}`}>{Array.from({ length: 8 }).map((__, i) => <td key={i}>&nbsp;</td>)}</tr>
                 ))}
               </tbody>

@@ -192,6 +192,7 @@ export const Layout: React.FC<LayoutProps> = ({ onLogout }) => {
     if (activePage === 'configurations') return <Configurations variant="system" />
     if (activePage === 'configurations-email') return <Configurations variant="email" />
     if (activePage === 'configurations-risk') return <Configurations variant="risk" />
+    if (activePage === 'configurations-alert-rules') return <Configurations variant="alert-rules" />
     if (activePage === 'configurations-api') return <Configurations variant="api" />
     if (activeLabel === 'Upload Data') return <TransactionsUploadData />
     if (activeLabel === 'Batch Monitoring') return <TransactionsUpload />

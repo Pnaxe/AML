@@ -28,6 +28,7 @@ export type AmlPageId =
   | 'configurations'
   | 'configurations-email'
   | 'configurations-risk'
+  | 'configurations-alert-rules'
   | 'configurations-api'
 
 export type AmlSection = {
@@ -59,11 +60,13 @@ export const AML_SECTIONS: AmlSection[] = [
   { id: 'modelling-calibration', label: 'Model Calibration' },
   { id: 'modelling-testing', label: 'Testing Accuracy' },
   { id: 'reports', label: 'Operational Reports' },
+  { id: 'sar', label: 'SAR Accounts' },
   { id: 'reports-sar', label: 'SAR Reports' },
   { id: 'reports-exports', label: 'Data Exports' },
   { id: 'configurations', label: 'System & Database' },
   { id: 'configurations-email', label: 'Email & Notifications' },
-  { id: 'configurations-risk', label: 'Risk & Automation' },
+  { id: 'configurations-risk', label: 'Risk Thresholds' },
+  { id: 'configurations-alert-rules', label: 'Alert Rules' },
   { id: 'configurations-api', label: 'API Keys' },
 ]
 

@@ -2,7 +2,7 @@
 AI/ML Service for AML Transaction Monitoring and Risk Scoring
 """
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import timedelta
 from django.db.models import Count, Avg, Sum, Q
 from django.conf import settings
 from typing import Dict, List, Tuple
@@ -11,6 +11,7 @@ import logging
 from transactions.models import Transaction
 from accounts.models import Customer
 from .models import RiskScore, AnomalyDetection, ModelPrediction
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ class TransactionRiskScorer:
     def _calculate_velocity_risk(self, transaction: Transaction) -> float:
         """Calculate risk based on transaction velocity"""
         # Count transactions from sender in last 24 hours
-        day_ago = datetime.now() - timedelta(hours=24)
+        day_ago = timezone.now() - timedelta(hours=24)
         recent_count = Transaction.objects.filter(
             sender=transaction.sender,
             transaction_date__gte=day_ago
@@ -245,7 +246,7 @@ class AnomalyDetector:
         anomalies = []
         
         # Get recent transactions
-        cutoff_date = datetime.now() - timedelta(days=lookback_days)
+        cutoff_date = timezone.now() - timedelta(days=lookback_days)
         recent_transactions = Transaction.objects.filter(
             sender=customer,
             transaction_date__gte=cutoff_date
@@ -320,7 +321,7 @@ class StructuringDetector:
         Returns structuring indicators
         """
         # Look for multiple transactions just below threshold
-        cutoff_time = datetime.now() - timedelta(hours=self.STRUCTURING_WINDOW_HOURS)
+        cutoff_time = timezone.now() - timedelta(hours=self.STRUCTURING_WINDOW_HOURS)
         
         suspicious_transactions = Transaction.objects.filter(
             sender=customer,

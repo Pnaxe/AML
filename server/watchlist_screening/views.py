@@ -178,6 +178,55 @@ class ScreeningViewSet(viewsets.ViewSet):
         except (TypeError, ValueError):
             return 0.85
 
+    @staticmethod
+    def _customer_screening_identity(customer):
+        if customer.customer_type == 'INDIVIDUAL':
+            customer_name = customer.get_full_name()
+        else:
+            customer_name = customer.company_name
+        entity_type = 'ORGANIZATION' if customer.customer_type == 'CORPORATE' else 'INDIVIDUAL'
+        return (customer_name or '').strip(), entity_type
+
+    @staticmethod
+    def _match_names_by_type(screening_results, type_fragment):
+        names = []
+        fragment = type_fragment.upper()
+        for match in screening_results.get('matches', []):
+            match_type = str(match.get('type') or '').upper()
+            matched_name = str(match.get('matched_name') or '').strip()
+            if fragment in match_type and matched_name:
+                names.append(matched_name)
+        return names
+
+    def _merge_dilisense_results(self, screening_results, customer_name, entity_type):
+        if not customer_name:
+            return [], None
+
+        dilisense_matches, dilisense_source = self._run_dilisense_screening(customer_name, entity_type)
+        if not dilisense_matches:
+            return dilisense_matches, dilisense_source
+
+        screening_results.setdefault('matches', []).extend(dilisense_matches)
+        risk_flags = screening_results.setdefault('risk_flags', [])
+        if 'DILISENSE_MATCH' not in risk_flags:
+            risk_flags.append('DILISENSE_MATCH')
+        if screening_results.get('overall_status') == 'CLEAR':
+            screening_results['overall_status'] = 'REVIEW'
+
+        for provider_match in dilisense_matches:
+            match_type = str(provider_match.get('type') or '').upper()
+            if 'PEP' in match_type:
+                screening_results['pep_match'] = True
+            if 'SANCTION' in match_type:
+                screening_results['sanctions_match'] = True
+                screening_results['overall_status'] = 'BLOCK'
+            if 'CRIMINAL' in match_type:
+                screening_results['criminal_match'] = True
+            if 'ADVERSE' in match_type:
+                screening_results['adverse_media_match'] = True
+
+        return dilisense_matches, dilisense_source
+
     def _run_dilisense_screening(self, name, entity_type):
         api_key = self._dilisense_key_from_config()
         provider = {
@@ -260,16 +309,18 @@ class ScreeningViewSet(viewsets.ViewSet):
                 try:
                     # Run screening
                     screening_results = screening_service.screen_customer(customer)
+                    customer_name, entity_type = self._customer_screening_identity(customer)
+                    self._merge_dilisense_results(screening_results, customer_name, entity_type)
                     
                     # Update customer flags based on results
                     if screening_results['pep_match']:
                         customer.is_pep = True
-                        customer.pep_details = f"PEP match found: {', '.join([m['matched_name'] for m in screening_results['matches'] if m['type'] == 'PEP'])}"
+                        customer.pep_details = f"PEP match found: {', '.join(self._match_names_by_type(screening_results, 'PEP'))}"
                         results['pep_matches'] += 1
                     
                     if screening_results['sanctions_match']:
                         customer.is_sanctioned = True
-                        customer.sanction_details = f"Sanctions match found: {', '.join([m['matched_name'] for m in screening_results['matches'] if m['type'] == 'SANCTIONS'])}"
+                        customer.sanction_details = f"Sanctions match found: {', '.join(self._match_names_by_type(screening_results, 'SANCTION'))}"
                         results['sanctions_matches'] += 1
                     
                     # Calculate and update risk level
@@ -307,7 +358,7 @@ class ScreeningViewSet(viewsets.ViewSet):
                             source, _ = WatchlistSource.objects.get_or_create(
                                 name=match.get('source', 'Unknown'),
                                 defaults={
-                                    'source_type': match.get('type', 'CUSTOM'),
+                                    'source_type': self._source_type_for_match(match),
                                     'provider': match.get('source', 'Unknown'),
                                     'status': 'ACTIVE',
                                     'is_enabled': True
@@ -333,7 +384,7 @@ class ScreeningViewSet(viewsets.ViewSet):
                             )
                             
                             # Determine match type based on similarity
-                            similarity = match.get('similarity', 0.85)
+                            similarity = self._similarity_for_match(match)
                             if similarity >= 0.9:
                                 match_type = 'EXACT'
                             elif similarity >= 0.8:
@@ -419,31 +470,16 @@ class ScreeningViewSet(viewsets.ViewSet):
 
                 customer = Customer.objects.using(source_db).get(id=customer_pk, is_active=True)
                 screening_results = screening_service.screen_customer(customer)
-                customer_name = customer.get_full_name() if customer.customer_type == 'INDIVIDUAL' else customer.company_name
-                entity_type = 'ORGANIZATION' if customer.customer_type == 'CORPORATE' else 'INDIVIDUAL'
-                dilisense_matches, _dilisense_source = self._run_dilisense_screening(customer_name or '', entity_type) if customer_name else ([], None)
-                if dilisense_matches:
-                    screening_results.setdefault('matches', []).extend(dilisense_matches)
-                    screening_results.setdefault('risk_flags', []).append('DILISENSE_MATCH')
-                    screening_results['overall_status'] = 'REVIEW' if screening_results.get('overall_status') == 'CLEAR' else screening_results.get('overall_status', 'REVIEW')
-                    for provider_match in dilisense_matches:
-                        match_type = str(provider_match.get('type') or '').upper()
-                        if 'PEP' in match_type:
-                            screening_results['pep_match'] = True
-                        if 'SANCTION' in match_type:
-                            screening_results['sanctions_match'] = True
-                        if 'CRIMINAL' in match_type:
-                            screening_results['criminal_match'] = True
-                        if 'ADVERSE' in match_type:
-                            screening_results['adverse_media_match'] = True
+                customer_name, entity_type = self._customer_screening_identity(customer)
+                self._merge_dilisense_results(screening_results, customer_name, entity_type)
 
                 if screening_results.get('pep_match'):
                     customer.is_pep = True
-                    customer.pep_details = f"PEP match found: {', '.join([m['matched_name'] for m in screening_results.get('matches', []) if m.get('type') == 'PEP'])}"
+                    customer.pep_details = f"PEP match found: {', '.join(self._match_names_by_type(screening_results, 'PEP'))}"
 
                 if screening_results.get('sanctions_match'):
                     customer.is_sanctioned = True
-                    customer.sanction_details = f"Sanctions match found: {', '.join([m['matched_name'] for m in screening_results.get('matches', []) if m.get('type') == 'SANCTIONS'])}"
+                    customer.sanction_details = f"Sanctions match found: {', '.join(self._match_names_by_type(screening_results, 'SANCTION'))}"
 
                 if screening_results.get('sanctions_match'):
                     customer.risk_level = 'CRITICAL'

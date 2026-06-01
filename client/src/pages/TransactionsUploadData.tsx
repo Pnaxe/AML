@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { HiOutlineDownload, HiOutlineUpload, HiOutlineX } from 'react-icons/hi'
+import { HiOutlineDownload, HiOutlineUpload } from 'react-icons/hi'
 import { useToast } from '../contexts/ToastContext'
 import './Customers.css'
 
@@ -329,13 +329,10 @@ export const TransactionsUploadData: React.FC = () => {
       </div>
 
       {showUploadModal && (
-        <div className="modal-backdrop" onClick={() => setShowUploadModal(false)}>
+        <div className="modal-backdrop">
           <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2 className="modal-title">Upload Transaction Batch</h2>
-              <button className="modal-close-btn" onClick={() => setShowUploadModal(false)} aria-label="Close">
-                <HiOutlineX size={18} />
-              </button>
             </div>
             <div className="modal-form">
                 <div className="modal-body">

@@ -34,6 +34,11 @@ type TransactionAlertSource = {
   status: string
   risk_score: number
   is_suspicious: boolean
+  amount_threshold_flag?: boolean
+  velocity_flag?: boolean
+  structuring_flag?: boolean
+  unusual_pattern_flag?: boolean
+  high_risk_country_flag?: boolean
   transaction_date: string
 }
 
@@ -78,7 +83,17 @@ function flaggedTransactionsToAlerts(
   const coveredTransactionIds = new Set(existingAlerts.flatMap((alert) => alert.transaction_ids ?? []))
 
   return transactions
-    .filter((tx) => tx.is_suspicious || tx.status === 'BLOCKED' || tx.status === 'UNDER_REVIEW')
+    .filter((tx) => (
+      tx.is_suspicious ||
+      tx.status === 'FLAGGED' ||
+      tx.status === 'BLOCKED' ||
+      tx.status === 'UNDER_REVIEW' ||
+      tx.amount_threshold_flag ||
+      tx.velocity_flag ||
+      tx.structuring_flag ||
+      tx.unusual_pattern_flag ||
+      tx.high_risk_country_flag
+    ))
     .filter((tx) => !coveredTransactionIds.has(tx.transaction_id))
     .map((tx, index) => {
       const severity: AlertItem['severity'] =

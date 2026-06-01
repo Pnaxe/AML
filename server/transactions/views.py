@@ -357,12 +357,13 @@ class TransactionViewSet(viewsets.ModelViewSet):
             imported_count = 0
             skipped_count = 0
             
-            # Get all active customers for validation by database id or customer_id code.
-            active_customers = Customer.objects.filter(is_active=True)
-            customers_by_db_id = {customer.id: customer for customer in active_customers}
+            # Reuse existing customers by database id or customer_id code. Include inactive
+            # records so importing historical files does not try to recreate a unique ID.
+            all_customers = Customer.objects.all()
+            customers_by_db_id = {customer.id: customer for customer in all_customers}
             customers_by_customer_id = {
                 customer.customer_id.strip().upper(): customer
-                for customer in active_customers
+                for customer in all_customers
                 if customer.customer_id
             }
             
@@ -394,22 +395,31 @@ class TransactionViewSet(viewsets.ModelViewSet):
             def ensure_customer_for_import(raw_value):
                 customer = resolve_customer_reference(raw_value)
                 if customer is not None:
+                    if not customer.is_active:
+                        customer.is_active = True
+                        customer.save(update_fields=['is_active', 'updated_at'])
                     return customer
 
                 raw_text = str(raw_value).strip() if raw_value is not None else ''
                 if not raw_text:
                     return None
 
-                placeholder_customer = Customer.objects.create(
+                placeholder_customer, created = Customer.objects.get_or_create(
                     customer_id=raw_text,
-                    customer_type='CORPORATE',
-                    company_name=f'Imported Customer {raw_text}',
-                    risk_level='LOW',
-                    is_active=True,
+                    defaults={
+                        'customer_type': 'CORPORATE',
+                        'company_name': f'Imported Customer {raw_text}',
+                        'risk_level': 'LOW',
+                        'is_active': True,
+                    }
                 )
+                if not placeholder_customer.is_active:
+                    placeholder_customer.is_active = True
+                    placeholder_customer.save(update_fields=['is_active', 'updated_at'])
                 customers_by_db_id[placeholder_customer.id] = placeholder_customer
                 customers_by_customer_id[raw_text.upper()] = placeholder_customer
-                logger.info('Created placeholder customer for transaction import: %s', raw_text)
+                if created:
+                    logger.info('Created placeholder customer for transaction import: %s', raw_text)
                 return placeholder_customer
             
             for index, row in df.iterrows():

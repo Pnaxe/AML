@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { HiOutlineKey, HiOutlinePencil, HiOutlineSearch, HiOutlineTrash, HiOutlineX } from 'react-icons/hi'
 import { useToast } from '../contexts/ToastContext'
 import { useAuth } from '../contexts/AuthContext'
+import { AlertRulesPanel } from './AlertRulesPanel'
 import './Customers.css'
 
 type AmlConfig = {
@@ -84,7 +85,7 @@ type ConfigRow = {
   isCustomApiKey?: boolean
 }
 
-type ConfigurationsVariant = 'system' | 'email' | 'risk' | 'api'
+type ConfigurationsVariant = 'system' | 'email' | 'risk' | 'alert-rules' | 'api'
 
 type ConfigurationsProps = {
   variant?: ConfigurationsVariant
@@ -145,7 +146,9 @@ export const Configurations: React.FC<ConfigurationsProps> = ({ variant = 'syste
     variant === 'email'
       ? 'Email & Notifications'
       : variant === 'risk'
-        ? 'Risk & Automation'
+        ? 'Risk Thresholds'
+        : variant === 'alert-rules'
+          ? 'Alert Rules'
         : variant === 'api'
           ? 'API Keys'
           : 'System & Database'
@@ -153,10 +156,12 @@ export const Configurations: React.FC<ConfigurationsProps> = ({ variant = 'syste
     variant === 'email'
       ? 'Configure outbound mail delivery used for alerts, notifications, and analyst communication.'
       : variant === 'risk'
-        ? 'Manage AML thresholds and automation switches that control screening, SAR, and model monitoring.'
+        ? 'Manage global risk score thresholds and automation switches for screening, SAR, and model monitoring.'
+        : variant === 'alert-rules'
+          ? 'Create the parameters, rules, and thresholds that decide when transactions become alerts.'
         : variant === 'api'
           ? 'Secure and manage external integration credentials for transaction feeds, screening, and model registry access.'
-          : 'Manage environment, core API, database, and Redis settings for the platform runtime.'
+        : 'Manage environment, core API, database, and Redis settings for the platform runtime.'
 
   const rows = useMemo<ConfigRow[]>(() => {
     const secret = (v: string) => maskValue(v)
@@ -390,6 +395,14 @@ export const Configurations: React.FC<ConfigurationsProps> = ({ variant = 'syste
       console.error(error)
       showToast(`Unable to delete ${row.key}.`)
     }
+  }
+
+  if (variant === 'alert-rules') {
+    return (
+      <div className="reports-container config-page">
+        <AlertRulesPanel />
+      </div>
+    )
   }
 
   return (

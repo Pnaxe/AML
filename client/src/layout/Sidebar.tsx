@@ -16,6 +16,7 @@ import {
   HiOutlineDatabase,
   HiOutlineClipboardCheck,
   HiOutlineCog,
+  HiOutlineAdjustments,
 } from 'react-icons/hi'
 import './Sidebar.css'
 import { Logo } from './Logo'
@@ -88,6 +89,8 @@ const iconForPage = (id: AmlPageId): React.ReactNode => {
     case 'configurations-email':
       return <HiOutlineCog size={18} />
     case 'configurations-risk':
+      return <HiOutlineAdjustments size={18} />
+    case 'configurations-alert-rules':
       return <HiOutlineCog size={18} />
     case 'configurations-api':
       return <HiOutlineCog size={18} />
@@ -109,8 +112,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ open, setOpen, activePage, onS
   const screeningGroup: AmlPageId[] = ['screening', 'screening-manual', 'screening-approved', 'screening-declined']
   const transactionsGroup: AmlPageId[] = ['transactions', 'transactions-upload', 'transactions-upload-data']
   const modellingGroup: AmlPageId[] = ['modelling', 'modelling-load', 'modelling-calibration', 'modelling-testing']
-  const reportsGroup: AmlPageId[] = ['reports', 'reports-sar', 'reports-exports']
-  const configurationsGroup: AmlPageId[] = ['configurations', 'configurations-email', 'configurations-risk', 'configurations-api']
+  const reportsGroup: AmlPageId[] = ['reports', 'sar', 'reports-sar', 'reports-exports']
+  const configurationsGroup: AmlPageId[] = ['configurations', 'configurations-email', 'configurations-risk', 'configurations-alert-rules', 'configurations-api']
   const visibleSections = dashboardGroup.includes(activePage)
     ? AML_SECTIONS.filter((item) => dashboardGroup.includes(item.id))
     : dataGroup.includes(activePage)

@@ -392,7 +392,7 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
     () => executedBatchRows.filter((row) => row.is_suspicious || row.status === 'FLAGGED' || row.status === 'BLOCKED'),
     [executedBatchRows],
   )
-  const latestBatchId = batchOptions.length > 0 ? batchOptions[batchOptions.length - 1] : ''
+  const latestBatchId = batchOptions.length > 0 ? batchOptions[0] : ''
 
   useEffect(() => {
     if (variant !== 'upload') return
@@ -407,7 +407,14 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
       return
     }
     setExecutedBatchIds((prev) => prev.filter((batchId) => batchOptions.includes(batchId)))
-    setActiveExecutedBatchId((prev) => (prev && batchOptions.includes(prev) ? prev : ''))
+    setActiveExecutedBatchId((prev) => {
+      if (prev && batchOptions.includes(prev)) return prev
+      return latestBatchId
+    })
+    if (latestBatchId) {
+      setExecutedBatchId(latestBatchId)
+      setExecutedBatchIds((prev) => (prev.includes(latestBatchId) ? prev : [latestBatchId, ...prev]))
+    }
   }, [variant, batchOptions, selectedBatchId, latestBatchId])
 
   useEffect(() => {
@@ -880,7 +887,7 @@ export const Transactions: React.FC<TransactionsProps> = ({ variant = 'realtime'
           </div>
         )}
 
-        {variant !== 'upload' && (
+        {!isUploadDataView && (
           <div className={`customers-table-card-outer ${!loading && !error && pageRows.length === 0 ? 'table-empty-state' : ''}`}>
             {!loading && !error && pageRows.length === 0 && (
               <div className="table-empty-watermark" aria-hidden="true">

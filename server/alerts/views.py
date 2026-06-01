@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
+from django.db.models import Sum
 from django.utils import timezone
 from django.http import HttpResponse
 
@@ -13,6 +14,8 @@ from .serializers import (
     InvestigationSerializer,
     AlertRuleSerializer
 )
+from .default_rules import ensure_default_alert_rules
+from ml_engine.monitoring import TransactionMonitor
 
 
 class AlertViewSet(viewsets.ModelViewSet):
@@ -131,6 +134,7 @@ class AlertViewSet(viewsets.ModelViewSet):
         """
         Get alerts that still require manual analyst review.
         """
+        TransactionMonitor().backfill_missing_alerts()
         review_statuses = ['NEW', 'ASSIGNED', 'IN_PROGRESS', 'ESCALATED']
         flagged = self.queryset.filter(status__in=review_statuses)
         page = self.paginate_queryset(flagged)
@@ -257,6 +261,9 @@ class AlertViewSet(viewsets.ModelViewSet):
             sar_reference = inv.sar_reference if inv else ''
             sar_filing_date = inv.sar_filing_date if inv else alert.updated_at
             report_text = (alert.resolution_notes or '') or (inv.action_taken if inv else '') or (alert.investigation_notes or '')
+            linked_transactions = alert.transactions.all()
+            tx_aggregate = linked_transactions.aggregate(total_amount=Sum('amount'))
+            first_tx = linked_transactions.order_by('-transaction_date').first()
 
             row = {
                 'id': alert.id,
@@ -264,9 +271,19 @@ class AlertViewSet(viewsets.ModelViewSet):
                 'sar_reference': sar_reference,
                 'customer_id': customer.customer_id,
                 'customer_name': customer_name,
+                'customer_type': customer.customer_type,
+                'customer_country': customer.country,
+                'customer_city': customer.city,
+                'customer_phone': customer.phone_number,
+                'customer_email': customer.email,
                 'alert_type': alert.alert_type,
                 'severity': alert.severity,
                 'risk_score': alert.risk_score,
+                'transaction_count': linked_transactions.count(),
+                'total_amount': str(tx_aggregate['total_amount'] or 0),
+                'currency': first_tx.currency if first_tx else 'USD',
+                'account_number': first_tx.sender_account if first_tx else '',
+                'bank_name': first_tx.sender_bank if first_tx else '',
                 'title': alert.title,
                 'description': alert.description,
                 'report_text': report_text,
@@ -431,6 +448,19 @@ class AlertRuleViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['rule_type', 'severity', 'is_active']
     search_fields = ['name', 'description']
+
+    def list(self, request, *args, **kwargs):
+        ensure_default_alert_rules()
+        return super().list(request, *args, **kwargs)
+
+    @action(detail=False, methods=['post'])
+    def seed_defaults(self, request):
+        created = ensure_default_alert_rules()
+        return Response({
+            'message': f'{created} default alert rule(s) added',
+            'created': created,
+            'total': AlertRule.objects.count(),
+        })
     
     @action(detail=True, methods=['post'])
     def toggle_active(self, request, pk=None):

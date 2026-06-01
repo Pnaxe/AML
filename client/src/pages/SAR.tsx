@@ -9,9 +9,19 @@ type SarRow = {
   sar_reference: string
   customer_id: string
   customer_name: string
+  customer_type: string
+  customer_country: string
+  customer_city: string
+  customer_phone: string
+  customer_email: string
   alert_type: string
   severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
   risk_score: number
+  transaction_count: number
+  total_amount: string
+  currency: string
+  account_number: string
+  bank_name: string
   title: string
   description: string
   report_text: string
@@ -30,6 +40,12 @@ function fmtDate(v?: string): string {
   const d = new Date(v)
   if (Number.isNaN(d.getTime())) return v
   return d.toLocaleDateString('en-US')
+}
+
+function fmtMoney(amount?: string, currency?: string): string {
+  const n = Number(amount ?? 0)
+  if (Number.isNaN(n)) return `${currency ?? 'USD'} ${amount ?? '0'}`
+  return `${currency ?? 'USD'} ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 export const SAR: React.FC = () => {
@@ -66,7 +82,17 @@ export const SAR: React.FC = () => {
     const term = activeSearchTerm.toLowerCase()
     return rows.filter((r) => {
       if (term) {
-        const hay = [r.alert_id, r.sar_reference, r.customer_name, r.customer_id, r.title].join(' ').toLowerCase()
+        const hay = [
+          r.alert_id,
+          r.sar_reference,
+          r.customer_name,
+          r.customer_id,
+          r.customer_type,
+          r.customer_country,
+          r.account_number,
+          r.bank_name,
+          r.title,
+        ].join(' ').toLowerCase()
         if (!hay.includes(term)) return false
       }
       if (severityFilter && r.severity !== severityFilter) return false
@@ -107,7 +133,7 @@ export const SAR: React.FC = () => {
         <div className="view-profile-page screening-report">
           <header className="customers-header">
             <div>
-              <h1 className="customers-title">Screened Profile Report</h1>
+              <h1 className="customers-title">SAR Account Report</h1>
               <p className="customers-subtitle">
                 {selected.customer_name} ({selected.customer_id}) ·{' '}
                 <span className={`pill pill-${selected.severity.toLowerCase()}`}>{selected.severity}</span>{' '}
@@ -136,8 +162,14 @@ export const SAR: React.FC = () => {
                     <div className="view-profile-field"><span className="view-profile-label">Alert ID</span><span className="view-profile-value">{V(selected.alert_id)}</span></div>
                     <div className="view-profile-field"><span className="view-profile-label">Customer</span><span className="view-profile-value">{V(selected.customer_name)}</span></div>
                     <div className="view-profile-field"><span className="view-profile-label">Customer ID</span><span className="view-profile-value">{V(selected.customer_id)}</span></div>
+                    <div className="view-profile-field"><span className="view-profile-label">Customer type</span><span className="view-profile-value">{V(selected.customer_type)}</span></div>
+                    <div className="view-profile-field"><span className="view-profile-label">Country</span><span className="view-profile-value">{V(selected.customer_country)}</span></div>
+                    <div className="view-profile-field"><span className="view-profile-label">Account number</span><span className="view-profile-value">{V(selected.account_number)}</span></div>
+                    <div className="view-profile-field"><span className="view-profile-label">Bank</span><span className="view-profile-value">{V(selected.bank_name)}</span></div>
                     <div className="view-profile-field"><span className="view-profile-label">Alert Type</span><span className="view-profile-value">{V(selected.alert_type)}</span></div>
                     <div className="view-profile-field"><span className="view-profile-label">Submitted At</span><span className="view-profile-value">{fmtDate(selected.submitted_at)}</span></div>
+                    <div className="view-profile-field"><span className="view-profile-label">Transactions</span><span className="view-profile-value">{selected.transaction_count ?? 0}</span></div>
+                    <div className="view-profile-field"><span className="view-profile-label">Total amount</span><span className="view-profile-value">{fmtMoney(selected.total_amount, selected.currency)}</span></div>
                     <div className="view-profile-field"><span className="view-profile-label">Risk score</span><span className="view-profile-value">{(selected.risk_score * 100).toFixed(1)}%</span></div>
                     <div className="view-profile-field"><span className="view-profile-label">Severity</span><span className="view-profile-value">{selected.severity}</span></div>
                   </div>
@@ -162,8 +194,8 @@ export const SAR: React.FC = () => {
     <div className="reports-container">
       <header className="customers-header">
         <div>
-          <h1 className="customers-title">SAR</h1>
-          <p className="customers-subtitle">Reports submitted to the regulator, with downloadable PDF copies.</p>
+          <h1 className="customers-title">SAR Accounts</h1>
+          <p className="customers-subtitle">Filed alert accounts with regulator references and downloadable SAR copies.</p>
         </div>
       </header>
 
@@ -173,7 +205,7 @@ export const SAR: React.FC = () => {
             <form onSubmit={(e) => { e.preventDefault(); setActiveSearchTerm(searchTerm.trim()); setCurrentPage(1) }} className="filter-group filter-group-search">
               <div className="search-input-wrapper">
                 <span className="search-icon" aria-hidden><HiOutlineSearch size={18} /></span>
-                <input type="text" className="filter-input search-input" placeholder="Search by SAR ref, alert ID, customer..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                <input type="text" className="filter-input search-input" placeholder="Search SAR ref, alert ID, account, customer..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                 {searchTerm && <button type="button" className="search-clear-btn" onClick={() => { setSearchTerm(''); setActiveSearchTerm('') }}><HiOutlineX size={18} /></button>}
               </div>
             </form>
@@ -198,7 +230,12 @@ export const SAR: React.FC = () => {
                   <th>SAR REFERENCE</th>
                   <th>ALERT ID</th>
                   <th>CUSTOMER</th>
+                  <th>ACCOUNT</th>
+                  <th>BANK</th>
                   <th>TYPE</th>
+                  <th>COUNTRY</th>
+                  <th>TXNS</th>
+                  <th>AMOUNT</th>
                   <th>SEVERITY</th>
                   <th>SUBMITTED</th>
                   <th>ACTIONS</th>
@@ -206,14 +243,19 @@ export const SAR: React.FC = () => {
               </thead>
               <tbody>
                 {error ? (
-                  <tr><td colSpan={7} className="muted">{error}</td></tr>
+                  <tr><td colSpan={12} className="muted">{error}</td></tr>
                 ) : (
                   pageRows.map((r) => (
                     <tr key={r.id}>
                       <td className="customer-id">{r.sar_reference || '-'}</td>
                       <td>{r.alert_id}</td>
                       <td>{r.customer_name} <span className="muted">({r.customer_id})</span></td>
-                      <td>{r.alert_type}</td>
+                      <td>{r.account_number || '-'}</td>
+                      <td>{r.bank_name || '-'}</td>
+                      <td>{r.customer_type || r.alert_type}</td>
+                      <td>{r.customer_country || '-'}</td>
+                      <td>{r.transaction_count ?? 0}</td>
+                      <td>{fmtMoney(r.total_amount, r.currency)}</td>
                       <td><span className={`pill pill-${r.severity.toLowerCase()}`}>{r.severity}</span></td>
                       <td className="muted">{fmtDate(r.submitted_at)}</td>
                       <td>
@@ -226,7 +268,7 @@ export const SAR: React.FC = () => {
                   ))
                 )}
                 {!error && Array.from({ length: Math.max(0, PAGE_SIZE - pageRows.length) }).map((_, idx) => (
-                  <tr key={`empty-${idx}`}>{Array.from({ length: 7 }).map((__, i) => <td key={i}>&nbsp;</td>)}</tr>
+                  <tr key={`empty-${idx}`}>{Array.from({ length: 12 }).map((__, i) => <td key={i}>&nbsp;</td>)}</tr>
                 ))}
               </tbody>
             </table>

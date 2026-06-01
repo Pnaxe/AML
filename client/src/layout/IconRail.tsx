@@ -92,6 +92,7 @@ function getActiveRailSection(activeSection: AmlPageId): AmlPageId {
   if (
     activeSection === 'configurations-email' ||
     activeSection === 'configurations-risk' ||
+    activeSection === 'configurations-alert-rules' ||
     activeSection === 'configurations-api'
   ) {
     return 'configurations'
